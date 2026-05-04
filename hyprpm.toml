@@ -1,0 +1,15 @@
+[repository]
+name = "hyprview"
+authors = ["imperishableSecret"]
+commit_pins = [
+    # ["<hyprland commit>", "<hyprview commit>"]
+
+]
+
+[hyprview]
+description = "A plugin to add a scrolling hyprview overlay for workspaces"
+authors = ["imperishableSecret"]
+output = "hyprview/hyprview.so"
+build = [
+    "make -C hyprview all",
+]
