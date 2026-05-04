@@ -28,6 +28,11 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         throw std::runtime_error("[he] Version mismatch");
     }
 
+    if (Config::mgr()->type() != Config::CONFIG_LUA) {
+        Hyprview::failNotif("hyprview requires Hyprland Lua config");
+        throw std::runtime_error("[he] hyprview requires Hyprland Lua config");
+    }
+
     Hyprview::installPluginHooks();
     Hyprview::registerPluginEventListeners();
 

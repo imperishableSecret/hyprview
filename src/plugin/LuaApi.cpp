@@ -9,8 +9,6 @@
 #include <stdexcept>
 #include <string>
 
-#include <hyprland/src/config/ConfigManager.hpp>
-
 extern "C" {
 #include <lauxlib.h>
 #include <lua.h>
@@ -69,9 +67,6 @@ namespace Hyprview {
     }
 
     void registerLuaApi() {
-        if (Config::mgr()->type() != Config::CONFIG_LUA)
-            return;
-
         if (!HyprlandAPI::addLuaFunction(PHANDLE, "hyprview", "overview", overviewLua))
             throw std::runtime_error("[he] failed to register hl.plugin.hyprview.overview");
         if (!HyprlandAPI::addLuaFunction(PHANDLE, "hyprview", "gesture", overviewGestureLua))
