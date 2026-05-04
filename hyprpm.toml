@@ -3,6 +3,7 @@ name = "hyprview"
 authors = ["imperishableSecret"]
 commit_pins = [
     # ["<hyprland commit>", "<hyprview commit>"]
+    ["521ece463c4a9d3d128670688a34756805a4328f", "e820acfaec90dc5e5e2250e5ae9265f8bc1b575f"], # v0.54.3
 
 ]
 
