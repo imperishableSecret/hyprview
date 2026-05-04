@@ -3,6 +3,7 @@
 #include <hyprland/src/desktop/DesktopTypes.hpp>
 #include <hyprland/src/helpers/memory/Memory.hpp>
 #include <hyprutils/math/Region.hpp>
+#include <hyprutils/math/Vector2D.hpp>
 
 class IOverview {
   public:
@@ -28,6 +29,12 @@ class IOverview {
     virtual int64_t   selectedWorkspaceID() const          = 0;
     virtual PHLWINDOW selectedWindow() const {
         return nullptr;
+    }
+    virtual bool moveSelection(Vector2D direction) {
+        return false;
+    }
+    virtual bool activateSelection() {
+        return false;
     }
 
     virtual void  fullRender() = 0;

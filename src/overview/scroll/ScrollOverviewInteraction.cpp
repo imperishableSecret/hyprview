@@ -40,6 +40,7 @@ void                    CScrollOverview::selectHoveredWorkspace() {
     if (const auto WINDOW = windowAt(lastMousePosLocal); WINDOW && WINDOW->pWindow) {
         closeOnWindow    = WINDOW->pWindow;
         closeOnWorkspace = WINDOW->pWindow->m_workspace;
+        rememberWindowSelection(WINDOW->pWindow.lock());
         raiseFloatingWindow(WINDOW->pWindow.lock());
         return;
     }
@@ -64,6 +65,11 @@ PHLWINDOW CScrollOverview::selectedWindow() const {
 
 void CScrollOverview::handlePointerMotion(const Vector2D& local) {
     inputState.lastPosLocal = local;
+
+    if (keyboardSelectionLocked && local.distance(keyboardTakeoverMousePos) >= 12.0)
+        releaseKeyboardTakeoverMouse(g_hyprviewConfig.mouse.selectFollowsHover);
+
+    updateMouseEdgeNavigation(local);
 
     if (inputState.mode == ePointerMode::VIEW_PAN) {
         updateViewportPan(local);
@@ -202,6 +208,32 @@ void CScrollOverview::updateViewportPan(const Vector2D& local) {
     const auto DELTA_X = (local.x - inputState.pressPosLocal.x) / scale->value();
     setHorizontalPanForWorkspace(inputState.pannedWorkspace, inputState.contentPanOnPress - DELTA_X);
     highlightHoverDebug(false);
+}
+
+void CScrollOverview::updateMouseEdgeNavigation(const Vector2D& local) {
+    if (!g_hyprviewConfig.mouse.edgeNavigation || keyboardSelectionLocked || inputState.mode != ePointerMode::IDLE || !pMonitor)
+        return;
+
+    const double ZONE = std::max(0.0, sc<double>(g_hyprviewConfig.scrolling.edgeScrollZone));
+    if (ZONE <= 0.0)
+        return;
+
+    double direction = 0.0;
+    double strength  = 0.0;
+
+    if (local.y < ZONE) {
+        direction = -1.0;
+        strength  = (ZONE - std::max(0.0, local.y)) / ZONE;
+    } else if (local.y > pMonitor->m_size.y - ZONE) {
+        direction = 1.0;
+        strength  = (local.y - (pMonitor->m_size.y - ZONE)) / ZONE;
+    }
+
+    if (direction == 0.0)
+        return;
+
+    const auto SPEED = std::max(0.0F, g_hyprviewConfig.mouse.edgeNavigationSpeed) * 0.08 * pMonitor->m_size.y;
+    moveViewportBy(direction * strength * SPEED, false, false);
 }
 
 void CScrollOverview::updateEdgeAutoscroll(uint64_t nowMs) {
@@ -364,24 +396,33 @@ void CScrollOverview::highlightHoverDebug(bool damageOnChange) {
 
     const auto OLD_HOVERED_WINDOW    = hoveredWindow;
     const auto OLD_HOVERED_WORKSPACE = hoveredWorkspace;
+    const auto OLD_KEYBOARD_WINDOW   = keyboardSelectedWindow;
 
     hoveredWindow.reset();
     hoveredWorkspace.reset();
 
-    for (const auto& wimg : images) {
-        for (const auto& img : wimg->windowImages) {
-            img->highlight = false;
-        }
-    }
+    clearWindowHighlights();
 
     if (const auto WINDOW = windowAt(lastMousePosLocal); WINDOW && WINDOW->pWindow) {
-        WINDOW->highlight = true;
-        hoveredWindow     = WINDOW->pWindow;
-        hoveredWorkspace  = WINDOW->pWindow->m_workspace;
+        hoveredWindow    = WINDOW->pWindow;
+        hoveredWorkspace = WINDOW->pWindow->m_workspace;
+
+        if (!g_hyprviewConfig.keyboard.enabled)
+            WINDOW->highlight = true;
+        else if (g_hyprviewConfig.mouse.selectFollowsHover && !keyboardSelectionLocked)
+            setKeyboardSelection(WINDOW, false, false);
     } else if (const auto WORKSPACE = workspaceAt(lastMousePosLocal); WORKSPACE && WORKSPACE->pWorkspace) {
         hoveredWorkspace = WORKSPACE->pWorkspace;
     }
 
-    if (damageOnChange && (OLD_HOVERED_WINDOW != hoveredWindow || OLD_HOVERED_WORKSPACE != hoveredWorkspace))
+    if (g_hyprviewConfig.keyboard.enabled) {
+        if (!imageForKeyboardSelection())
+            syncSelectionToViewport(false);
+
+        if (const auto SELECTED = imageForKeyboardSelection())
+            SELECTED->highlight = true;
+    }
+
+    if (damageOnChange && (OLD_HOVERED_WINDOW != hoveredWindow || OLD_HOVERED_WORKSPACE != hoveredWorkspace || OLD_KEYBOARD_WINDOW != keyboardSelectedWindow))
         damage();
 }

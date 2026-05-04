@@ -2,6 +2,7 @@
 
 #include "Dispatchers.hpp"
 #include "Globals.hpp"
+#include "KeyboardGrab.hpp"
 #include "LuaConfig.hpp"
 #include "../gestures/GestureRegistration.hpp"
 #include "../overview/IOverview.hpp"
@@ -66,6 +67,56 @@ namespace Hyprview {
         return 0;
     }
 
+    int selectionLeftLua(lua_State* L) {
+        if (!lua_isnoneornil(L, 1))
+            return luaL_error(L, "hyprview.selection_left: expected no arguments");
+
+        if (g_pOverview)
+            g_pOverview->moveSelection({-1.0, 0.0});
+
+        return 0;
+    }
+
+    int selectionRightLua(lua_State* L) {
+        if (!lua_isnoneornil(L, 1))
+            return luaL_error(L, "hyprview.selection_right: expected no arguments");
+
+        if (g_pOverview)
+            g_pOverview->moveSelection({1.0, 0.0});
+
+        return 0;
+    }
+
+    int selectionUpLua(lua_State* L) {
+        if (!lua_isnoneornil(L, 1))
+            return luaL_error(L, "hyprview.selection_up: expected no arguments");
+
+        if (g_pOverview)
+            g_pOverview->moveSelection({0.0, -1.0});
+
+        return 0;
+    }
+
+    int selectionDownLua(lua_State* L) {
+        if (!lua_isnoneornil(L, 1))
+            return luaL_error(L, "hyprview.selection_down: expected no arguments");
+
+        if (g_pOverview)
+            g_pOverview->moveSelection({0.0, 1.0});
+
+        return 0;
+    }
+
+    int selectionActivateLua(lua_State* L) {
+        if (!lua_isnoneornil(L, 1))
+            return luaL_error(L, "hyprview.selection_activate: expected no arguments");
+
+        if (g_pOverview)
+            g_pOverview->activateSelection();
+
+        return 0;
+    }
+
     void registerLuaApi() {
         if (!HyprlandAPI::addLuaFunction(PHANDLE, "hyprview", "overview", overviewLua))
             throw std::runtime_error("[he] failed to register hl.plugin.hyprview.overview");
@@ -77,6 +128,18 @@ namespace Hyprview {
             throw std::runtime_error("[he] failed to register hl.plugin.hyprview.close");
         if (!HyprlandAPI::addLuaFunction(PHANDLE, "hyprview", "move_hovered_window", moveHoveredWindowLua))
             throw std::runtime_error("[he] failed to register hl.plugin.hyprview.move_hovered_window");
+        if (!HyprlandAPI::addLuaFunction(PHANDLE, "hyprview", "selection_left", selectionLeftLua))
+            throw std::runtime_error("[he] failed to register hl.plugin.hyprview.selection_left");
+        if (!HyprlandAPI::addLuaFunction(PHANDLE, "hyprview", "selection_right", selectionRightLua))
+            throw std::runtime_error("[he] failed to register hl.plugin.hyprview.selection_right");
+        if (!HyprlandAPI::addLuaFunction(PHANDLE, "hyprview", "selection_up", selectionUpLua))
+            throw std::runtime_error("[he] failed to register hl.plugin.hyprview.selection_up");
+        if (!HyprlandAPI::addLuaFunction(PHANDLE, "hyprview", "selection_down", selectionDownLua))
+            throw std::runtime_error("[he] failed to register hl.plugin.hyprview.selection_down");
+        if (!HyprlandAPI::addLuaFunction(PHANDLE, "hyprview", "selection_activate", selectionActivateLua))
+            throw std::runtime_error("[he] failed to register hl.plugin.hyprview.selection_activate");
+        if (!HyprlandAPI::addLuaFunction(PHANDLE, "hyprview", "bind", bindLua))
+            throw std::runtime_error("[he] failed to register hl.plugin.hyprview.bind");
     }
 
 }

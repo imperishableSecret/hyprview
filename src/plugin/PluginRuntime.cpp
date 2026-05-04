@@ -1,6 +1,8 @@
 #include "PluginRuntime.hpp"
 
 #include "Globals.hpp"
+#include "KeyboardGrab.hpp"
+#include "LuaConfig.hpp"
 #include "../overview/IOverview.hpp"
 
 #include <hyprland/src/Compositor.hpp>
@@ -52,7 +54,14 @@ namespace Hyprview {
             g_pOverview->onPreRender();
         });
 
-        static auto preReloadListener = Event::bus()->m_events.config.preReload.listen([] { resetHyprviewConfig(); });
+        static auto preReloadListener = Event::bus()->m_events.config.preReload.listen([] {
+            resetHyprviewConfig();
+            resetLuaCallbacks();
+            resetKeyboardGrabBinds();
+        });
+
+        static auto keyboardGrabListener =
+            Event::bus()->m_events.input.keyboard.key.listen([](const IKeyboard::SKeyEvent& event, Event::SCallbackInfo& info) { handleKeyboardGrab(event, info); });
     }
 
 }

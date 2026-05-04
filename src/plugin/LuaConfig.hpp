@@ -4,6 +4,8 @@ struct lua_State;
 
 namespace Hyprview {
 
-    int configureLua(lua_State* L);
+    int  configureLua(lua_State* L);
+    void runOnCloseLuaCallback();
+    void resetLuaCallbacks();
 
 }

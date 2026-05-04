@@ -17,6 +17,28 @@ extern "C" {
 }
 
 namespace {
+    enum class eLuaCallbackUpdate {
+        UNCHANGED = 0,
+        CLEAR,
+        SET,
+    };
+
+    struct SLuaCallbackUpdate {
+        eLuaCallbackUpdate action = eLuaCallbackUpdate::UNCHANGED;
+        int                ref    = LUA_NOREF;
+    };
+
+    lua_State* g_luaState       = nullptr;
+    int        g_onCloseRef     = LUA_NOREF;
+    bool       g_runningOnClose = false;
+
+    void       unrefLuaCallback(lua_State* L, int& ref) {
+        if (L && ref != LUA_NOREF && ref != LUA_REFNIL)
+            luaL_unref(L, LUA_REGISTRYINDEX, ref);
+
+        ref = LUA_NOREF;
+    }
+
     std::expected<void, std::string> readLuaIntField(lua_State* L, int tableIdx, const char* key, int& value) {
         const int TABLE = lua_absindex(L, tableIdx);
         lua_getfield(L, TABLE, key);
@@ -176,6 +198,32 @@ namespace {
         return {};
     }
 
+    std::expected<void, std::string> applyLuaKeyboardConfig(lua_State* L, int tableIdx, SHyprviewKeyboardConfig& config) {
+        if (auto result = readLuaBoolField(L, tableIdx, "enabled", config.enabled); !result)
+            return result;
+        if (auto result = readLuaBoolField(L, tableIdx, "grab", config.grab); !result)
+            return result;
+        if (auto result = readLuaBoolField(L, tableIdx, "remember_selection", config.rememberSelection); !result)
+            return result;
+        if (auto result = readLuaBoolField(L, tableIdx, "wrap", config.wrap); !result)
+            return result;
+        if (auto result = readLuaBoolField(L, tableIdx, "activation_closes_overview", config.activationClosesOverview); !result)
+            return result;
+
+        return {};
+    }
+
+    std::expected<void, std::string> applyLuaMouseConfig(lua_State* L, int tableIdx, SHyprviewMouseConfig& config) {
+        if (auto result = readLuaBoolField(L, tableIdx, "select_follows_hover", config.selectFollowsHover); !result)
+            return result;
+        if (auto result = readLuaBoolField(L, tableIdx, "edge_navigation", config.edgeNavigation); !result)
+            return result;
+        if (auto result = readLuaFloatField(L, tableIdx, "edge_navigation_speed", config.edgeNavigationSpeed); !result)
+            return result;
+
+        return {};
+    }
+
     std::expected<void, std::string> applyLuaHyprviewConfig(lua_State* L, int tableIdx, SHyprviewConfig& config) {
         const int TABLE = lua_absindex(L, tableIdx);
 
@@ -183,6 +231,34 @@ namespace {
             return result;
 
         lua_getfield(L, TABLE, "scrolling");
+        if (!lua_isnil(L, -1)) {
+            if (!lua_istable(L, -1)) {
+                lua_pop(L, 1);
+                return std::unexpected("scrolling must be a table");
+            }
+
+            auto result = applyLuaScrollingConfig(L, lua_gettop(L), config.scrolling);
+            lua_pop(L, 1);
+            if (!result)
+                return result;
+        } else
+            lua_pop(L, 1);
+
+        lua_getfield(L, TABLE, "keyboard");
+        if (!lua_isnil(L, -1)) {
+            if (!lua_istable(L, -1)) {
+                lua_pop(L, 1);
+                return std::unexpected("keyboard must be a table");
+            }
+
+            auto result = applyLuaKeyboardConfig(L, lua_gettop(L), config.keyboard);
+            lua_pop(L, 1);
+            if (!result)
+                return result;
+        } else
+            lua_pop(L, 1);
+
+        lua_getfield(L, TABLE, "mouse");
         if (lua_isnil(L, -1)) {
             lua_pop(L, 1);
             return {};
@@ -190,12 +266,48 @@ namespace {
 
         if (!lua_istable(L, -1)) {
             lua_pop(L, 1);
-            return std::unexpected("scrolling must be a table");
+            return std::unexpected("mouse must be a table");
         }
 
-        auto result = applyLuaScrollingConfig(L, lua_gettop(L), config.scrolling);
+        auto result = applyLuaMouseConfig(L, lua_gettop(L), config.mouse);
         lua_pop(L, 1);
         return result;
+    }
+
+    std::expected<SLuaCallbackUpdate, std::string> readOnCloseCallback(lua_State* L, int tableIdx) {
+        const int TABLE = lua_absindex(L, tableIdx);
+        lua_getfield(L, TABLE, "on_close");
+
+        if (lua_isnil(L, -1)) {
+            lua_pop(L, 1);
+            return SLuaCallbackUpdate{};
+        }
+
+        if (lua_isboolean(L, -1) && !lua_toboolean(L, -1)) {
+            lua_pop(L, 1);
+            return SLuaCallbackUpdate{.action = eLuaCallbackUpdate::CLEAR};
+        }
+
+        if (!lua_isfunction(L, -1)) {
+            lua_pop(L, 1);
+            return std::unexpected("on_close must be a function, false, or nil");
+        }
+
+        const int REF = luaL_ref(L, LUA_REGISTRYINDEX);
+        return SLuaCallbackUpdate{.action = eLuaCallbackUpdate::SET, .ref = REF};
+    }
+
+    void applyOnCloseCallback(lua_State* L, SLuaCallbackUpdate update) {
+        if (update.action == eLuaCallbackUpdate::UNCHANGED)
+            return;
+
+        unrefLuaCallback(g_luaState, g_onCloseRef);
+
+        if (update.action == eLuaCallbackUpdate::SET) {
+            g_luaState   = L;
+            g_onCloseRef = update.ref;
+        } else
+            g_luaState = nullptr;
     }
 }
 
@@ -210,9 +322,34 @@ namespace Hyprview {
         if (!result)
             return Config::Lua::Bindings::Internal::configError(L, std::format("hyprview.configure: {}", result.error()));
 
+        auto callbackUpdate = readOnCloseCallback(L, 1);
+        if (!callbackUpdate)
+            return Config::Lua::Bindings::Internal::configError(L, std::format("hyprview.configure: {}", callbackUpdate.error()));
+
         g_hyprviewConfig = nextConfig;
+        applyOnCloseCallback(L, *callbackUpdate);
         damageOverviewMonitor();
         return 0;
+    }
+
+    void runOnCloseLuaCallback() {
+        if (!g_luaState || g_onCloseRef == LUA_NOREF || g_onCloseRef == LUA_REFNIL || g_runningOnClose)
+            return;
+
+        g_runningOnClose = true;
+        lua_rawgeti(g_luaState, LUA_REGISTRYINDEX, g_onCloseRef);
+        if (lua_pcall(g_luaState, 0, 0, 0) != LUA_OK) {
+            const char* ERROR = lua_tostring(g_luaState, -1);
+            HyprlandAPI::addNotification(PHANDLE, std::string{"[hyprview] on_close callback failed: "} + (ERROR ? ERROR : "unknown error"), CHyprColor{1.0, 0.2, 0.2, 1.0}, 5000);
+            lua_pop(g_luaState, 1);
+        }
+        g_runningOnClose = false;
+    }
+
+    void resetLuaCallbacks() {
+        unrefLuaCallback(g_luaState, g_onCloseRef);
+        g_luaState       = nullptr;
+        g_runningOnClose = false;
     }
 
 }

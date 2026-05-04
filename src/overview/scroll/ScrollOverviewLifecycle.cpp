@@ -1,4 +1,5 @@
 #include "ScrollOverview.hpp"
+#include "../../plugin/LuaConfig.hpp"
 #include <algorithm>
 #include <any>
 #include <cmath>
@@ -182,15 +183,22 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
     }
 
     viewportCurrentWorkspace = activeIdx;
+    syncSelectionToViewport(false);
     highlightHoverDebug();
 }
 
 void CScrollOverview::close(bool switchToSelection) {
+    const bool WAS_CLOSING = closing;
+
     cancelPointerInteraction(false);
     pendingAnchorWorkspace.reset();
     clearFocusedWindowCursorSync();
+    releaseKeyboardTakeoverMouse(false);
     viewOffset->setCallbackOnEnd(nullptr);
     closing = true;
+
+    if (!WAS_CLOSING)
+        Hyprview::runOnCloseLuaCallback();
 
     if (!closeOnWindow && !closeOnWorkspace)
         closeOnWindow = Desktop::focusState()->window();

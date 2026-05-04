@@ -41,6 +41,8 @@ class CScrollOverview : public IOverview {
     virtual void      selectHoveredWorkspace();
     virtual int64_t   selectedWorkspaceID() const;
     virtual PHLWINDOW selectedWindow() const;
+    virtual bool      moveSelection(Vector2D direction);
+    virtual bool      activateSelection();
 
     virtual void      fullRender();
 
@@ -91,6 +93,19 @@ class CScrollOverview : public IOverview {
     bool                     centerCursorOnWindowImage(PHLWINDOW window);
     void                     clearFocusedWindowCursorSync();
     void                     highlightHoverDebug(bool damageOnChange = true);
+    void                     clearWindowHighlights();
+    void                     rememberWindowSelection(PHLWINDOW window);
+    void                     pruneRememberedSelections();
+    void                     keyboardTakeoverMouse();
+    void                     releaseKeyboardTakeoverMouse(bool allowHoverSelection);
+    void                     syncSelectionToViewport(bool damageOnChange = true);
+    void                     setKeyboardSelection(SP<SWindowImage> image, bool lockedToKeyboard, bool damageOnChange = true);
+    SP<SWindowImage>         imageForKeyboardSelection() const;
+    SP<SWindowImage>         selectableImageForWorkspace(const SP<SWorkspaceImage>& workspace) const;
+    SP<SWorkspaceImage>      workspaceImageForWindow(PHLWINDOW window) const;
+    SP<SWorkspaceImage>      workspaceImageForWindowImage(const SP<SWindowImage>& image) const;
+    void                     ensureSelectionVisible(SP<SWindowImage> image);
+    bool                     moveHorizontalSelection(bool right);
     bool                     moveViewportWorkspace(bool up);
     bool                     setViewportWorkspace(size_t index, bool warp = false, bool activate = false);
     bool                     focusWorkspaceInViewport(SP<SWorkspaceImage> workspace, bool warp = false, bool activate = false);
@@ -105,7 +120,7 @@ class CScrollOverview : public IOverview {
     bool                     workspaceUsesScrollingLayout(PHLWORKSPACE workspace) const;
     SWorkspacePanRange       horizontalPanRangeForWorkspace(const SP<SWorkspaceImage>& workspace) const;
     double                   horizontalPanForWorkspace(const SP<SWorkspaceImage>& workspace) const;
-    bool                     setHorizontalPanForWorkspace(const SP<SWorkspaceImage>& workspace, double pan);
+    bool                     setHorizontalPanForWorkspace(const SP<SWorkspaceImage>& workspace, double pan, bool animate = false);
     void                     pruneWorkspaceContentPans();
     void                     handlePointerMotion(const Vector2D& local);
     void                     handlePointerPress(uint32_t button);
@@ -114,6 +129,7 @@ class CScrollOverview : public IOverview {
     void                     beginWindowDrag();
     void                     updateWindowDrag(const Vector2D& local);
     void                     updateViewportPan(const Vector2D& local);
+    void                     updateMouseEdgeNavigation(const Vector2D& local);
     void                     updateEdgeAutoscroll(uint64_t nowMs);
     void                     updateHoverActivation(uint64_t nowMs);
     void                     resetDragNavigationState();
@@ -200,10 +216,12 @@ class CScrollOverview : public IOverview {
     SP<SWorkspaceImage>                                   hoverActivateWorkspace;
     std::vector<SInsertionMarker>                         insertionMarkers;
     std::unordered_map<std::string, SP<Render::ITexture>> labelTextureCache;
-    std::unordered_map<WORKSPACEID, double>               workspaceContentPan;
+    std::unordered_map<WORKSPACEID, PHLANIMVAR<float>>    workspaceContentPan;
+    std::unordered_map<WORKSPACEID, PHLWINDOWREF>         rememberedSelection;
 
     PHLWINDOWREF                                          closeOnWindow;
     PHLWORKSPACEREF                                       closeOnWorkspace;
+    PHLWINDOWREF                                          keyboardSelectedWindow;
     PHLWINDOWREF                                          hoveredWindow;
     PHLWORKSPACEREF                                       hoveredWorkspace;
     PHLWORKSPACEREF                                       pendingAnchorWorkspace;
@@ -228,6 +246,8 @@ class CScrollOverview : public IOverview {
     bool                                                  cursorSyncWarping         = false;
     bool                                                  refreshingWorkspaceImages = false;
     bool                                                  closing                   = false;
+    bool                                                  keyboardSelectionLocked   = false;
+    Vector2D                                              keyboardTakeoverMousePos;
 
     CHyprSignalListener                                   mouseMoveHook;
     CHyprSignalListener                                   mouseButtonHook;

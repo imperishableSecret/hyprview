@@ -40,6 +40,7 @@ void                      CScrollOverview::refreshWorkspaceImages(PHLWORKSPACE p
     redrawAll();
     refreshingWorkspaceImages = false;
     rebuildGeometryCache();
+    syncSelectionToViewport(false);
 
     const auto VIEWPORT_WORKSPACE = preferredViewport ? preferredViewport : FALLBACK_VIEWPORT;
     bool       centeredPreferred  = false;

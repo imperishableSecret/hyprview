@@ -32,9 +32,25 @@ struct SHyprviewScrollingConfig {
     int64_t     invalidInsertionMarkerColor = 0x55FF5C5C;
 };
 
+struct SHyprviewKeyboardConfig {
+    bool enabled                  = true;
+    bool grab                     = false;
+    bool rememberSelection        = true;
+    bool wrap                     = true;
+    bool activationClosesOverview = true;
+};
+
+struct SHyprviewMouseConfig {
+    bool  selectFollowsHover  = true;
+    bool  edgeNavigation      = true;
+    float edgeNavigationSpeed = 1.0F;
+};
+
 struct SHyprviewConfig {
     int                      gestureDistance = 200;
     SHyprviewScrollingConfig scrolling;
+    SHyprviewKeyboardConfig  keyboard;
+    SHyprviewMouseConfig     mouse;
 };
 
 inline auto g_hyprviewConfig = SHyprviewConfig{};

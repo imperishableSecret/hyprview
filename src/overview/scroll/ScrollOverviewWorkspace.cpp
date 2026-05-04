@@ -31,7 +31,12 @@ static constexpr double INSERTION_MARKER_HEIGHT = 28.0;
 static constexpr double INSERTION_MARKER_GAP    = 8.0;
 static constexpr double INSERTION_MARKER_WIDTH  = 64.0;
 
-CBox                    CScrollOverview::boxUnion(const CBox& a, const CBox& b) {
+static void             damageOverviewForPan(WP<Hyprutils::Animation::CBaseAnimatedVariable> thisptr) {
+    if (g_pOverview)
+        g_pOverview->damage();
+}
+
+CBox CScrollOverview::boxUnion(const CBox& a, const CBox& b) {
     if (a.empty())
         return b;
     if (b.empty())
@@ -95,30 +100,36 @@ double CScrollOverview::horizontalPanForWorkspace(const SP<SWorkspaceImage>& wor
         return 0.0;
 
     const auto IT = workspaceContentPan.find(workspace->pWorkspace->m_id);
-    if (IT == workspaceContentPan.end())
+    if (IT == workspaceContentPan.end() || !IT->second)
         return 0.0;
 
     const auto RANGE = horizontalPanRangeForWorkspace(workspace);
-    return std::clamp(IT->second, RANGE.min, RANGE.max);
+    return std::clamp(sc<double>(IT->second->value()), RANGE.min, RANGE.max);
 }
 
-bool CScrollOverview::setHorizontalPanForWorkspace(const SP<SWorkspaceImage>& workspace, double pan) {
+bool CScrollOverview::setHorizontalPanForWorkspace(const SP<SWorkspaceImage>& workspace, double pan, bool animate) {
     if (!workspace || !workspace->pWorkspace || !workspaceUsesScrollingLayout(workspace->pWorkspace))
         return false;
 
     const auto RANGE   = horizontalPanRangeForWorkspace(workspace);
     const auto CLAMPED = std::clamp(pan, RANGE.min, RANGE.max);
     const auto KEY     = workspace->pWorkspace->m_id;
-    const auto IT      = workspaceContentPan.find(KEY);
-    const auto CURRENT = IT == workspaceContentPan.end() ? 0.0 : IT->second;
+    auto&      ANIM    = workspaceContentPan[KEY];
+
+    if (!ANIM) {
+        g_pAnimationManager->createAnimation(0.F, ANIM, Config::animationTree()->getAnimationPropertyConfig("windowsMove"), AVARDAMAGE_NONE);
+        ANIM->setUpdateCallback(damageOverviewForPan);
+    }
+
+    const auto CURRENT = sc<double>(ANIM->value());
 
     if (std::abs(CURRENT - CLAMPED) < 0.5)
         return false;
 
-    if (std::abs(CLAMPED) < 0.5)
-        workspaceContentPan.erase(KEY);
+    if (animate)
+        *ANIM = sc<float>(CLAMPED);
     else
-        workspaceContentPan[KEY] = CLAMPED;
+        ANIM->setValueAndWarp(sc<float>(CLAMPED));
 
     damage();
     if (pMonitor)

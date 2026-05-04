@@ -67,9 +67,12 @@ bool CScrollOverview::moveViewportBy(double deltaY, bool warp, bool activate) {
 }
 
 bool CScrollOverview::setViewportOffset(Vector2D offset, bool warp, bool activate) {
-    const auto CLAMPED = clampedViewOffset(offset);
+    const auto CLAMPED             = clampedViewOffset(offset);
+    const auto OLD_WORKSPACE_INDEX = viewportCurrentWorkspace;
     if (viewOffset->value().distance(CLAMPED) < 0.5) {
         syncViewportWorkspaceFromOffset(CLAMPED);
+        if (OLD_WORKSPACE_INDEX != viewportCurrentWorkspace)
+            syncSelectionToViewport(false);
         if (activate)
             activateViewportWorkspace();
         return false;
@@ -81,6 +84,8 @@ bool CScrollOverview::setViewportOffset(Vector2D offset, bool warp, bool activat
         *viewOffset = CLAMPED;
 
     syncViewportWorkspaceFromOffset(CLAMPED);
+    if (OLD_WORKSPACE_INDEX != viewportCurrentWorkspace)
+        syncSelectionToViewport(false);
     if (activate)
         activateViewportWorkspace();
     damage();

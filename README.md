@@ -16,6 +16,7 @@ Hyprview is a Hyprland plugin that adds a niri-like scrolling workspace overview
 | Workspace insertion markers | Drop a dragged window on a numbered insertion marker to create or select that workspace ID and move the window there. |
 | Horizontal content pan | Right-drag a workspace using Hyprland's `scrolling` tiled layout to pan tiled window thumbnails horizontally. |
 | Wheel navigation | Wheel input moves between overview workspaces by default. It can be configured to zoom instead. |
+| Keyboard selection | Optional Lua-controlled selection dispatchers move the selected thumbnail left/right/up/down and activate it. |
 | Normal Hyprland keybinds | Workspace switching, focus movement, and moving windows between workspaces keep working while the overview is open. Hyprview refreshes and recenters from the resulting Hyprland events. |
 | Trackpad gesture | Lua config can register a trackpad gesture that opens the overview when closed and drives overview scale while swiping. |
 | Workspace badges | Optional workspace annotations can show ID, name, ID/name combinations, or window count. |
@@ -77,6 +78,21 @@ Example:
 ```lua
 hl.plugin.hyprview.configure {
     gesture_distance = 200,
+    on_close = function()
+        hl.dispatch("submap", "reset")
+    end,
+    keyboard = {
+        enabled = true,
+        grab = false,
+        remember_selection = true,
+        wrap = true,
+        activation_closes_overview = true,
+    },
+    mouse = {
+        select_follows_hover = true,
+        edge_navigation = true,
+        edge_navigation_speed = 1.0,
+    },
     scrolling = {
         scroll_moves_up_down = true,
         default_zoom = 0.5,
@@ -118,6 +134,29 @@ hl.bind("SUPER+G", function()
 end)
 ```
 
+Keyboard selection can be bound through overview-local key overrides. These
+binds only run while Hyprview is open and `keyboard.grab = true`. Matching
+overview binds are cancelled before normal Hyprland keybind handling; unmatched
+keys continue through Hyprland normally.
+
+```lua
+hl.plugin.hyprview.configure {
+    keyboard = {
+        enabled = true,
+        grab = true,
+    },
+}
+
+hl.plugin.hyprview.bind("SUPER", "LEFT", hl.plugin.hyprview.selection_left)
+hl.plugin.hyprview.bind("SUPER", "RIGHT", hl.plugin.hyprview.selection_right)
+hl.plugin.hyprview.bind("SUPER", "UP", hl.plugin.hyprview.selection_up)
+hl.plugin.hyprview.bind("SUPER", "DOWN", hl.plugin.hyprview.selection_down)
+hl.plugin.hyprview.bind("", "RETURN", hl.plugin.hyprview.selection_activate)
+hl.plugin.hyprview.bind("", "ESCAPE", function()
+    hl.plugin.hyprview.close(false)
+end)
+```
+
 ## Options
 
 Top-level options:
@@ -125,6 +164,25 @@ Top-level options:
 | property | type | default | description |
 | --- | --- | --- | --- |
 | `gesture_distance` | integer | `200` | Gesture travel distance used to interpolate the overview scale animation. Values below `1` are treated as `1`. |
+| `on_close` | function, `false`, or `nil` | `nil` | Optional callback called once whenever the overview begins closing. Use it to reset Lua-owned submaps. `false` clears an existing callback. |
+
+Keyboard options:
+
+| property | type | default | description |
+| --- | --- | --- | --- |
+| `enabled` | boolean | `true` | Enables the overview-native selection dispatchers. If disabled, `selection_left`, `selection_right`, `selection_up`, `selection_down`, and `selection_activate` are no-ops. |
+| `grab` | boolean | `false` | Enables overview-local key overrides registered through `hl.plugin.hyprview.bind`. Only matching overview binds are cancelled while the overview is open; unmatched keys keep normal Hyprland behavior. |
+| `remember_selection` | boolean | `true` | Remembers the selected window per workspace and restores it when the viewport returns to that workspace. |
+| `wrap` | boolean | `true` | Allows left/right selection to wrap within a workspace and up/down selection to wrap between the first and last overview workspace. |
+| `activation_closes_overview` | boolean | `true` | `selection_activate` closes the overview after focusing the selected window. If disabled, it focuses the selected window and keeps the overview open. |
+
+Mouse options:
+
+| property | type | default | description |
+| --- | --- | --- | --- |
+| `select_follows_hover` | boolean | `true` | Pointer hover updates the selected thumbnail. Disable this if keyboard selection should stay fixed until keyboard navigation changes it. |
+| `edge_navigation` | boolean | `true` | Pointer motion near the top/bottom overview edge scrolls the workspace viewport. Disable this to rely on wheel input or right-click drag panning instead. |
+| `edge_navigation_speed` | float | `1.0` | Pointer edge-navigation speed multiplier. Higher values move through overview workspaces faster. |
 
 Scrolling options:
 
@@ -195,6 +253,11 @@ Insertion targets respect monitor-bound workspace rules. Existing target workspa
 | Mouse wheel with `scroll_moves_up_down = true` | Move the overview up/down by workspace. Wheel steps move one workspace; smooth vertical scrolling accumulates until the threshold is reached. Horizontal scroll axes are ignored. |
 | Mouse wheel with `scroll_moves_up_down = false` | Zoom the overview in/out. Zoom is clamped to `0.05..0.95` while wheel-zooming. |
 | Touch press | Select the hovered workspace/window and close the overview. |
+| `hl.plugin.hyprview.selection_left` | Move the selected thumbnail left within the current workspace. |
+| `hl.plugin.hyprview.selection_right` | Move the selected thumbnail right within the current workspace. |
+| `hl.plugin.hyprview.selection_up` | Move to the previous overview workspace and restore its remembered selection. |
+| `hl.plugin.hyprview.selection_down` | Move to the next overview workspace and restore its remembered selection. |
+| `hl.plugin.hyprview.selection_activate` | Focus the selected window. By default this also closes the overview. |
 | Normal Hyprland keybinds | Continue to focus or move windows. The overview queues refreshes and recenters from Hyprland workspace/window events. |
 
 While dragging a window, hovering a workspace body for `hover_activate_ms` centers that workspace. Moving the pointer into the top or bottom `edge_scroll_zone` autoscrolls through workspaces at `edge_scroll_speed`.
@@ -222,7 +285,25 @@ Starting the gesture opens the overview if it is closed. Starting the gesture wh
 | `hl.plugin.hyprview.overview` | action string or `{ action = "toggle" }` | Controls the overview. |
 | `hl.plugin.hyprview.close` | optional boolean or `{ select = true }` | Closes the overview. Pass `false` or `{ select = false }` to close without switching to the hovered selection. |
 | `hl.plugin.hyprview.move_hovered_window` | none | Moves the hovered overview window to the active workspace, focuses it, and warps the cursor to it. |
+| `hl.plugin.hyprview.bind` | `mods`, `key`, function or `false` | Registers an overview-local key override. The override only applies while Hyprview is open and `keyboard.grab = true`. Passing `false` removes that override. |
+| `hl.plugin.hyprview.selection_left` | none | Moves overview keyboard selection left within the current workspace. |
+| `hl.plugin.hyprview.selection_right` | none | Moves overview keyboard selection right within the current workspace. |
+| `hl.plugin.hyprview.selection_up` | none | Moves overview keyboard selection to the previous workspace. |
+| `hl.plugin.hyprview.selection_down` | none | Moves overview keyboard selection to the next workspace. |
+| `hl.plugin.hyprview.selection_activate` | none | Activates the selected overview window. |
 | `hl.plugin.hyprview.gesture` | `{ fingers, direction, gesture, mod?, scale?, disable_inhibit? }` | Registers or removes a trackpad gesture. |
+
+Keyboard dispatchers are plain Lua API calls. `hl.plugin.hyprview.bind` is the
+recommended way to reuse keys like `SUPER+LEFT` for overview selection without
+shadowing your normal Hyprland keybinds when the overview is closed.
+
+Hyprview still does not own Hyprland submap state. If you prefer a fully modal
+overview layer, define a Hyprland submap in Lua and bind the selection functions
+inside that submap.
+
+`on_close` is the intended bridge for modal key layers. It lets Lua reset a
+submap even when the overview closes through mouse selection, touch, gesture, or
+another plugin path.
 
 Overview actions:
 
