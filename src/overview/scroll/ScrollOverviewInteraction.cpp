@@ -3,6 +3,7 @@
 #include <any>
 #include <cmath>
 #include <linux/input-event-codes.h>
+#include <wlr-layer-shell-unstable-v1.hpp>
 #define private   public
 #define protected public
 #include <hyprland/src/render/Renderer.hpp>
@@ -11,6 +12,7 @@
 #include <hyprland/src/config/ConfigManager.hpp>
 #include <hyprland/src/config/shared/workspace/WorkspaceRuleManager.hpp>
 #include <hyprland/src/config/shared/animation/AnimationTree.hpp>
+#include <hyprland/src/desktop/view/LayerSurface.hpp>
 #include <hyprland/src/layout/algorithm/Algorithm.hpp>
 #include <hyprland/src/layout/algorithm/TiledAlgorithm.hpp>
 #include <hyprland/src/layout/supplementary/WorkspaceAlgoMatcher.hpp>
@@ -31,7 +33,29 @@
 static constexpr double DRAG_THRESHOLD                    = 8.0;
 static constexpr double SMOOTH_SCROLL_WORKSPACE_THRESHOLD = 120.0;
 
-void                    CScrollOverview::selectHoveredWorkspace() {
+bool                    CScrollOverview::pointerOverBlockingLayerSurface(const Vector2D& local) const {
+    if (!pMonitor || inputState.mode != ePointerMode::IDLE)
+        return false;
+
+    const auto GLOBAL = pMonitor->m_position + local;
+
+    Vector2D   surfaceCoords;
+    PHLLS      foundLayer;
+
+    if (const auto SURFACE = g_pCompositor->vectorToLayerPopupSurface(GLOBAL, pMonitor.lock(), &surfaceCoords, &foundLayer);
+        SURFACE && foundLayer && foundLayer->m_layer >= ZWLR_LAYER_SHELL_V1_LAYER_TOP)
+        return true;
+
+    if (g_pCompositor->vectorToLayerSurface(GLOBAL, &pMonitor->m_layerSurfaceLayers[ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY], &surfaceCoords, &foundLayer))
+        return true;
+
+    if (g_pCompositor->vectorToLayerSurface(GLOBAL, &pMonitor->m_layerSurfaceLayers[ZWLR_LAYER_SHELL_V1_LAYER_TOP], &surfaceCoords, &foundLayer))
+        return true;
+
+    return false;
+}
+
+void CScrollOverview::selectHoveredWorkspace() {
     rebuildGeometryCache();
 
     closeOnWindow.reset();

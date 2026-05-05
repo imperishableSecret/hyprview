@@ -9,6 +9,7 @@
 #include <hyprland/src/helpers/AnimatedVariable.hpp>
 #include <hyprland/src/event/EventBus.hpp>
 #include <hyprland/src/helpers/signal/Signal.hpp>
+#include <chrono>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -18,6 +19,7 @@
 #include "../IOverview.hpp"
 
 class CMonitor;
+struct wl_event_source;
 
 class CScrollOverview : public IOverview {
   public:
@@ -28,6 +30,10 @@ class CScrollOverview : public IOverview {
     virtual void damage();
     virtual void onDamageReported();
     virtual void onDamageReported(const CRegion& damage);
+    virtual bool shouldHandleSurfaceDamage(SP<CWLSurfaceResource> surface);
+    virtual bool shouldAllowSurfaceFrame(SP<CWLSurfaceResource> surface, const Time::steady_tp& now);
+    virtual bool shouldAllowRealtimePreviewSchedule();
+    virtual bool shouldSuppressRenderDamage() const;
     virtual void onPreRender();
 
     virtual void setClosing(bool closing);
@@ -66,6 +72,21 @@ class CScrollOverview : public IOverview {
         NONE = 0,
         WORKSPACE_BODY,
         WORKSPACE_INSERTION,
+    };
+
+    enum class eOverviewSurfaceOwner {
+        UNKNOWN = 0,
+        WINDOW,
+        LAYER,
+        WINDOW_POPUP,
+        LAYER_POPUP,
+    };
+
+    struct SOverviewSurfaceOwner {
+        eOverviewSurfaceOwner type = eOverviewSurfaceOwner::UNKNOWN;
+        PHLWINDOW             window;
+        PHLLS                 layer;
+        PHLMONITOR            monitor;
     };
 
     struct SDropTarget {
@@ -127,6 +148,7 @@ class CScrollOverview : public IOverview {
     void                     handlePointerPress(uint32_t button);
     void                     handlePointerRelease(uint32_t button);
     void                     handlePointerAxis(IPointer::SAxisEvent event);
+    bool                     pointerOverBlockingLayerSurface(const Vector2D& local) const;
     void                     beginWindowDrag();
     void                     updateWindowDrag(const Vector2D& local);
     void                     updateViewportPan(const Vector2D& local);
@@ -159,6 +181,16 @@ class CScrollOverview : public IOverview {
     void                     renderInsertionMarkers();
     bool                     redrawDirtyWindowImages();
     bool                     markDirtyWindowImagesForDamage(const CRegion& damage);
+    SOverviewSurfaceOwner    overviewSurfaceOwner(SP<CWLSurfaceResource> surface) const;
+    bool                     overviewWindowVisible(PHLWINDOW window) const;
+    bool                     surfaceTreeHasFrameCallbacks(SP<CWLSurfaceResource> surface) const;
+    void                     surfaceTreePresent(SP<CWLSurfaceResource> surface, PHLMONITOR monitor, const Time::steady_tp& now);
+    void                     sendOverviewFrameCallbacks(const Time::steady_tp& now);
+    bool                     shouldAllowRealtimePreviewFrame() const;
+    void                     schedulePreviewFrameAfter(std::chrono::milliseconds delay);
+    void                     scheduleMinimumPreviewFrame();
+    void                     scheduleRealtimePreviewFrame();
+    static int               realtimePreviewTimerCallback(void* data);
     void                     renderWindowImage(SP<SWindowImage> img, const CBox& box, double alpha = 1.0);
     void                     renderFocusIndicator(SP<SWindowImage> img);
     void                     renderActiveWindowIndicator(SP<SWindowImage> img);
@@ -225,9 +257,12 @@ class CScrollOverview : public IOverview {
     std::unordered_map<std::string, SP<Render::ITexture>> labelTextureCache;
     std::unordered_map<WORKSPACEID, PHLANIMVAR<float>>    workspaceContentPan;
     std::unordered_map<WORKSPACEID, PHLWINDOWREF>         rememberedSelection;
-    int                                                   mouseEdgeNavigationDirection = 0;
-    int                                                   mouseSnapPanDirection        = 0;
-    bool                                                  mouseSnapPanBlockedUntilExit = false;
+    int                                                   mouseEdgeNavigationDirection  = 0;
+    int                                                   mouseSnapPanDirection         = 0;
+    bool                                                  mouseSnapPanBlockedUntilExit  = false;
+    bool                                                  realtimePreviewTimerArmed     = false;
+    bool                                                  realtimePreviewFrameQueued    = false;
+    bool                                                  sendingOverviewFrameCallbacks = false;
 
     PHLWINDOWREF                                          closeOnWindow;
     PHLWORKSPACEREF                                       closeOnWorkspace;
@@ -252,6 +287,9 @@ class CScrollOverview : public IOverview {
 
     PHLANIMVAR<float>                                     scale;
     PHLANIMVAR<Vector2D>                                  viewOffset;
+    Time::steady_tp                                       lastRealtimePreviewFrame = {};
+    Time::steady_tp                                       realtimePreviewTimerDue  = {};
+    wl_event_source*                                      realtimePreviewTimer     = nullptr;
 
     bool                                                  refreshQueued = false;
     PHLWORKSPACEREF                                       queuedRefreshWorkspace;

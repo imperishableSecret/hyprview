@@ -4,6 +4,9 @@
 #include <any>
 #include <cmath>
 #include <linux/input-event-codes.h>
+#include <wayland-server-core.h>
+#include <wlr-layer-shell-unstable-v1.hpp>
+#include <hyprutils/utils/ScopeGuard.hpp>
 
 #define private   public
 #define protected public
@@ -36,7 +39,16 @@ static void damageMonitor(WP<Hyprutils::Animation::CBaseAnimatedVariable> thispt
 }
 
 static void removeOverview(WP<Hyprutils::Animation::CBaseAnimatedVariable> thisptr) {
+    const auto OVERVIEW = g_pOverview;
+    const auto MONITOR  = OVERVIEW && OVERVIEW->pMonitor ? OVERVIEW->pMonitor.lock() : PHLMONITOR{};
+
+    g_pHyprRenderer->m_renderPass.removeAllOfType("COverviewPassElement");
     g_pOverview.reset();
+
+    if (MONITOR) {
+        g_pHyprRenderer->damageMonitor(MONITOR);
+        g_pCompositor->scheduleFrameForMonitor(MONITOR);
+    }
 }
 
 static float hyprlerp(const float& from, const float& to, const float perc) {
@@ -49,6 +61,10 @@ static Vector2D hyprlerp(const Vector2D& from, const Vector2D& to, const float p
 
 CScrollOverview::~CScrollOverview() {
     g_pHyprOpenGL->makeEGLCurrent();
+    if (realtimePreviewTimer) {
+        wl_event_source_remove(realtimePreviewTimer);
+        realtimePreviewTimer = nullptr;
+    }
     images.clear(); // otherwise we get a vram leak
     Cursor::overrideController->unsetOverride(Cursor::CURSOR_OVERRIDE_SPECIAL_ACTION);
 }
@@ -56,6 +72,9 @@ CScrollOverview::~CScrollOverview() {
 CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : startedOn(startedOn_), swipe(swipe_) {
     const auto PMONITOR = Desktop::focusState()->monitor();
     pMonitor            = PMONITOR;
+
+    realtimePreviewTimer = wl_event_loop_add_timer(g_pCompositor->m_wlEventLoop, realtimePreviewTimerCallback, this);
+    scheduleMinimumPreviewFrame();
 
     for (const auto& w : g_pCompositor->getWorkspaces()) {
         if (w && w->m_monitor == pMonitor && !w->m_isSpecialWorkspace && workspaceVisibleInOverview(w.lock()))
@@ -79,6 +98,12 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
         if (closing)
             return;
 
+        const auto LOCAL = g_pInputManager->getMouseCoordsInternal() - pMonitor->m_position;
+        if (pointerOverBlockingLayerSurface(LOCAL)) {
+            lastMousePosLocal = LOCAL;
+            return;
+        }
+
         info.cancelled = true;
 
         if (!cursorSyncWarping && cursorSyncUntilMs != 0 && inputState.mode == ePointerMode::IDLE) {
@@ -90,7 +115,7 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
                 clearFocusedWindowCursorSync();
         }
 
-        lastMousePosLocal = g_pInputManager->getMouseCoordsInternal() - pMonitor->m_position;
+        lastMousePosLocal = LOCAL;
         handlePointerMotion(lastMousePosLocal);
     };
 
@@ -98,7 +123,14 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
         if (closing)
             return;
 
-        info.cancelled = true;
+        const auto LOCAL = g_pInputManager->getMouseCoordsInternal() - pMonitor->m_position;
+        if (pointerOverBlockingLayerSurface(LOCAL)) {
+            lastMousePosLocal = LOCAL;
+            return;
+        }
+
+        info.cancelled    = true;
+        lastMousePosLocal = LOCAL;
 
         if (e.state == WL_POINTER_BUTTON_STATE_PRESSED)
             handlePointerPress(e.button);
@@ -110,7 +142,14 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
         if (closing)
             return;
 
-        info.cancelled = true;
+        const auto LOCAL = g_pInputManager->getMouseCoordsInternal() - pMonitor->m_position;
+        if (pointerOverBlockingLayerSurface(LOCAL)) {
+            lastMousePosLocal = LOCAL;
+            return;
+        }
+
+        info.cancelled    = true;
+        lastMousePosLocal = LOCAL;
         handlePointerAxis(e);
     };
 
@@ -317,6 +356,42 @@ void CScrollOverview::render() {
         highlightHoverDebug(false);
 
     g_pHyprRenderer->m_renderPass.add(makeUnique<COverviewPassElement>());
+
+    const auto MONITOR = pMonitor.lock();
+    if (!MONITOR)
+        return;
+
+    const bool PREVIOUS_BLOCK_SURFACE_FEEDBACK = g_pHyprRenderer->m_bBlockSurfaceFeedback;
+    g_pHyprRenderer->m_bBlockSurfaceFeedback   = true;
+    auto restoreSurfaceFeedback = Hyprutils::Utils::CScopeGuard([PREVIOUS_BLOCK_SURFACE_FEEDBACK] { g_pHyprRenderer->m_bBlockSurfaceFeedback = PREVIOUS_BLOCK_SURFACE_FEEDBACK; });
+
+    const auto NOW = Time::steadyNow();
+
+    for (const auto& ls : MONITOR->m_layerSurfaceLayers[ZWLR_LAYER_SHELL_V1_LAYER_TOP]) {
+        const auto LAYER = ls.lock();
+        if (Desktop::View::validMapped(LAYER))
+            g_pHyprRenderer->renderLayer(LAYER, MONITOR, NOW);
+    }
+
+    for (const auto& ls : MONITOR->m_layerSurfaceLayers[ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY]) {
+        const auto LAYER = ls.lock();
+        if (Desktop::View::validMapped(LAYER))
+            g_pHyprRenderer->renderLayer(LAYER, MONITOR, NOW);
+    }
+
+    for (const auto& ls : MONITOR->m_layerSurfaceLayers[ZWLR_LAYER_SHELL_V1_LAYER_TOP]) {
+        const auto LAYER = ls.lock();
+        if (Desktop::View::validMapped(LAYER))
+            g_pHyprRenderer->renderLayer(LAYER, MONITOR, NOW, true);
+    }
+
+    for (const auto& ls : MONITOR->m_layerSurfaceLayers[ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY]) {
+        const auto LAYER = ls.lock();
+        if (Desktop::View::validMapped(LAYER))
+            g_pHyprRenderer->renderLayer(LAYER, MONITOR, NOW, true);
+    }
+
+    sendOverviewFrameCallbacks(NOW);
 }
 
 void CScrollOverview::setClosing(bool closing_) {

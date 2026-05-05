@@ -233,6 +233,9 @@ void CScrollOverview::onDamageReported(const CRegion& damageRegion) {
     if (!pMonitor || closing)
         return;
 
+    if (damageRegion.empty())
+        return;
+
     if (markDirtyWindowImagesForDamage(damageRegion)) {
         damageDirty = true;
         damage();
