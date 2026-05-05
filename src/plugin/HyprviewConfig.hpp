@@ -43,9 +43,12 @@ struct SHyprviewKeyboardConfig {
 struct SHyprviewMouseConfig {
     bool  selectFollowsHover  = true;
     bool  edgeNavigation      = true;
+    bool  edgeNavigationSnap  = true;
     float edgeNavigationSpeed = 1.0F;
     int   hitboxExpansion     = 16;
     bool  nearestHitbox       = true;
+    bool  snapPan             = true;
+    int   snapPanZone         = 96;
 };
 
 struct SHyprviewConfig {

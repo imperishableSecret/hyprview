@@ -130,6 +130,9 @@ class CScrollOverview : public IOverview {
     void                     updateWindowDrag(const Vector2D& local);
     void                     updateViewportPan(const Vector2D& local);
     void                     updateMouseEdgeNavigation(const Vector2D& local);
+    bool                     updateMouseWorkspaceEdgeNavigation(const Vector2D& local);
+    void                     updateMouseSnapPanNavigation(const Vector2D& local);
+    bool                     snapMousePanForWorkspace(const SP<SWorkspaceImage>& workspace, int direction);
     void                     updateEdgeAutoscroll(uint64_t nowMs);
     void                     updateHoverActivation(uint64_t nowMs);
     void                     resetDragNavigationState();
@@ -218,6 +221,9 @@ class CScrollOverview : public IOverview {
     std::unordered_map<std::string, SP<Render::ITexture>> labelTextureCache;
     std::unordered_map<WORKSPACEID, PHLANIMVAR<float>>    workspaceContentPan;
     std::unordered_map<WORKSPACEID, PHLWINDOWREF>         rememberedSelection;
+    int                                                   mouseEdgeNavigationDirection = 0;
+    int                                                   mouseSnapPanDirection        = 0;
+    bool                                                  mouseSnapPanBlockedUntilExit = false;
 
     PHLWINDOWREF                                          closeOnWindow;
     PHLWORKSPACEREF                                       closeOnWorkspace;
@@ -225,6 +231,7 @@ class CScrollOverview : public IOverview {
     PHLWINDOWREF                                          hoveredWindow;
     PHLWORKSPACEREF                                       hoveredWorkspace;
     PHLWORKSPACEREF                                       pendingAnchorWorkspace;
+    PHLWORKSPACEREF                                       mouseSnapPanWorkspace;
 
     std::vector<SP<SWorkspaceImage>>                      images;
     SP<SWorkspaceImage>                                   imageForWorkspace(PHLWORKSPACE w);

@@ -66,8 +66,10 @@ PHLWINDOW CScrollOverview::selectedWindow() const {
 void CScrollOverview::handlePointerMotion(const Vector2D& local) {
     inputState.lastPosLocal = local;
 
-    if (keyboardSelectionLocked && local.distance(keyboardTakeoverMousePos) >= 12.0)
+    if (keyboardSelectionLocked && local.distance(keyboardTakeoverMousePos) >= 12.0) {
         releaseKeyboardTakeoverMouse(g_hyprviewConfig.mouse.selectFollowsHover);
+        mouseSnapPanBlockedUntilExit = true;
+    }
 
     updateMouseEdgeNavigation(local);
 
@@ -210,30 +212,158 @@ void CScrollOverview::updateViewportPan(const Vector2D& local) {
     highlightHoverDebug(false);
 }
 
-void CScrollOverview::updateMouseEdgeNavigation(const Vector2D& local) {
+bool CScrollOverview::snapMousePanForWorkspace(const SP<SWorkspaceImage>& workspace, int direction) {
+    if (!workspace || !workspace->pWorkspace || direction == 0)
+        return false;
+
+    const auto RANGE = horizontalPanRangeForWorkspace(workspace);
+    if (RANGE.max - RANGE.min <= 0.5)
+        return false;
+
+    const double     SCALE        = std::max(0.1F, scale->value());
+    const double     TARGET_X     = workspace->overviewBox.middle().x;
+    const double     CURRENT_PAN  = horizontalPanForWorkspace(workspace);
+    const double     CENTER_GRACE = 1.0;
+
+    SP<SWindowImage> target;
+    double           bestScore = std::numeric_limits<double>::max();
+
+    for (const auto& image : workspace->windowImages) {
+        if (!image || !image->pWindow || image->overviewBox.empty())
+            continue;
+
+        const auto WINDOW = image->pWindow.lock();
+        if (!WINDOW || WINDOW->m_isFloating)
+            continue;
+
+        const double CENTER = image->overviewBox.middle().x;
+        if (direction > 0 && CENTER <= TARGET_X + CENTER_GRACE)
+            continue;
+        if (direction < 0 && CENTER >= TARGET_X - CENTER_GRACE)
+            continue;
+
+        const double score = std::abs(CENTER - TARGET_X);
+
+        if (score < bestScore) {
+            target    = image;
+            bestScore = score;
+        }
+    }
+
+    if (!target)
+        return false;
+
+    const double DELTA = target->overviewBox.middle().x - TARGET_X;
+    return setHorizontalPanForWorkspace(workspace, CURRENT_PAN + DELTA / SCALE, true);
+}
+
+bool CScrollOverview::updateMouseWorkspaceEdgeNavigation(const Vector2D& local) {
     if (!g_hyprviewConfig.mouse.edgeNavigation || keyboardSelectionLocked || inputState.mode != ePointerMode::IDLE || !pMonitor)
-        return;
+        return false;
 
     const double ZONE = std::max(0.0, sc<double>(g_hyprviewConfig.scrolling.edgeScrollZone));
     if (ZONE <= 0.0)
-        return;
+        return false;
 
-    double direction = 0.0;
+    int    direction = 0;
     double strength  = 0.0;
 
     if (local.y < ZONE) {
-        direction = -1.0;
+        direction = -1;
         strength  = (ZONE - std::max(0.0, local.y)) / ZONE;
     } else if (local.y > pMonitor->m_size.y - ZONE) {
-        direction = 1.0;
+        direction = 1;
         strength  = (local.y - (pMonitor->m_size.y - ZONE)) / ZONE;
     }
 
-    if (direction == 0.0)
-        return;
+    if (direction == 0) {
+        mouseEdgeNavigationDirection = 0;
+        return false;
+    }
+
+    if (g_hyprviewConfig.mouse.edgeNavigationSnap) {
+        if (mouseEdgeNavigationDirection == direction)
+            return true;
+
+        mouseEdgeNavigationDirection = direction;
+        moveViewportWorkspace(direction > 0);
+        return true;
+    }
+
+    mouseEdgeNavigationDirection = 0;
 
     const auto SPEED = std::max(0.0F, g_hyprviewConfig.mouse.edgeNavigationSpeed) * 0.08 * pMonitor->m_size.y;
     moveViewportBy(direction * strength * SPEED, false, false);
+    return true;
+}
+
+void CScrollOverview::updateMouseSnapPanNavigation(const Vector2D& local) {
+    if (!g_hyprviewConfig.mouse.snapPan || keyboardSelectionLocked || inputState.mode != ePointerMode::IDLE || !pMonitor) {
+        mouseSnapPanDirection = 0;
+        mouseSnapPanWorkspace.reset();
+        return;
+    }
+
+    const double ZONE = std::max(0.0, sc<double>(g_hyprviewConfig.mouse.snapPanZone));
+    if (ZONE <= 0.0) {
+        mouseSnapPanDirection = 0;
+        mouseSnapPanWorkspace.reset();
+        mouseSnapPanBlockedUntilExit = false;
+        return;
+    }
+
+    int direction = 0;
+    if (local.x < ZONE)
+        direction = -1;
+    else if (local.x > pMonitor->m_size.x - ZONE)
+        direction = 1;
+
+    if (direction == 0) {
+        mouseSnapPanDirection = 0;
+        mouseSnapPanWorkspace.reset();
+        mouseSnapPanBlockedUntilExit = false;
+        return;
+    }
+
+    if (mouseSnapPanBlockedUntilExit) {
+        mouseSnapPanDirection = direction;
+        mouseSnapPanWorkspace.reset();
+        return;
+    }
+
+    SP<SWorkspaceImage> WORKSPACE;
+    for (auto it = images.rbegin(); it != images.rend(); ++it) {
+        const auto& image = *it;
+        if (!image || !image->pWorkspace)
+            continue;
+
+        if (local.y >= image->overviewBox.y && local.y <= image->overviewBox.y + image->overviewBox.h) {
+            WORKSPACE = image;
+            break;
+        }
+    }
+
+    if (!WORKSPACE || !workspaceUsesScrollingLayout(WORKSPACE->pWorkspace)) {
+        mouseSnapPanDirection = 0;
+        mouseSnapPanWorkspace.reset();
+        return;
+    }
+
+    if (mouseSnapPanWorkspace == WORKSPACE->pWorkspace && mouseSnapPanDirection == direction)
+        return;
+
+    if (snapMousePanForWorkspace(WORKSPACE, direction)) {
+        mouseSnapPanWorkspace = WORKSPACE->pWorkspace;
+        mouseSnapPanDirection = direction;
+        highlightHoverDebug(false);
+    }
+}
+
+void CScrollOverview::updateMouseEdgeNavigation(const Vector2D& local) {
+    if (updateMouseWorkspaceEdgeNavigation(local))
+        return;
+
+    updateMouseSnapPanNavigation(local);
 }
 
 void CScrollOverview::updateEdgeAutoscroll(uint64_t nowMs) {

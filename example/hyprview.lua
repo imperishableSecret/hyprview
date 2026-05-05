@@ -29,9 +29,12 @@ hv.configure {
     mouse = {
         select_follows_hover = true,
         edge_navigation = true,
+        edge_navigation_snap = true,
         edge_navigation_speed = 1.0,
         hitbox_expansion = 16,
         nearest_hitbox = true,
+        snap_pan = true,
+        snap_pan_zone = 96,
     },
 
     scrolling = {
