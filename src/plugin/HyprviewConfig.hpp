@@ -44,6 +44,8 @@ struct SHyprviewMouseConfig {
     bool  selectFollowsHover  = true;
     bool  edgeNavigation      = true;
     float edgeNavigationSpeed = 1.0F;
+    int   hitboxExpansion     = 16;
+    bool  nearestHitbox       = true;
 };
 
 struct SHyprviewConfig {
