@@ -131,12 +131,6 @@ bool CScrollOverview::shouldHandleSurfaceDamage(SP<CWLSurfaceResource> surface) 
         if (!OWNER.layer)
             return false;
 
-        if (OWNER.layer->m_layer >= ZWLR_LAYER_SHELL_V1_LAYER_TOP) {
-            damage();
-            g_pCompositor->scheduleFrameForMonitor(MONITOR);
-            return false;
-        }
-
         return true;
     }
 
@@ -172,8 +166,10 @@ bool CScrollOverview::shouldAllowSurfaceFrame(SP<CWLSurfaceResource> surface, co
     if (!OWNER.window)
         return true;
 
-    if (!overviewWindowVisible(OWNER.window))
+    if (!overviewWindowVisible(OWNER.window)) {
+        scheduleRealtimePreviewFrame();
         return false;
+    }
 
     if (sendingOverviewFrameCallbacks)
         return true;
@@ -267,10 +263,11 @@ void CScrollOverview::sendOverviewFrameCallbacks(const Time::steady_tp& now) {
     if (!MONITOR || closing)
         return;
 
-    bool       sentFrame          = false;
+    bool       sentWindowFrame    = false;
     const bool CAN_FRAME_WINDOW   = shouldAllowRealtimePreviewFrame();
     const bool PREVIOUS_SENDING   = sendingOverviewFrameCallbacks;
     sendingOverviewFrameCallbacks = CAN_FRAME_WINDOW;
+    const auto DRAGGED_WINDOW     = inputState.draggedWindow.lock();
 
     for (const auto& wimg : images) {
         if (!wimg || wimg->overviewBox.empty() || !wimg->overviewBox.overlaps(CBox{{}, MONITOR->m_size}))
@@ -283,6 +280,8 @@ void CScrollOverview::sendOverviewFrameCallbacks(const Time::steady_tp& now) {
             const auto WINDOW = img->pWindow.lock();
             if (!windowImageRenderable(WINDOW) || !overviewWindowVisible(WINDOW))
                 continue;
+            if (DRAGGED_WINDOW && WINDOW == DRAGGED_WINDOW)
+                continue;
 
             if (!CAN_FRAME_WINDOW) {
                 scheduleRealtimePreviewFrame();
@@ -290,7 +289,7 @@ void CScrollOverview::sendOverviewFrameCallbacks(const Time::steady_tp& now) {
             }
 
             surfaceTreePresent(WINDOW->wlSurface() ? WINDOW->wlSurface()->resource() : nullptr, MONITOR, now);
-            sentFrame = true;
+            sentWindowFrame = true;
         }
     }
 
@@ -303,14 +302,12 @@ void CScrollOverview::sendOverviewFrameCallbacks(const Time::steady_tp& now) {
                 continue;
 
             const auto SURFACE = LAYER_SURFACE->wlSurface() ? LAYER_SURFACE->wlSurface()->resource() : nullptr;
-            if (surfaceTreeHasFrameCallbacks(SURFACE)) {
+            if (surfaceTreeHasFrameCallbacks(SURFACE))
                 surfaceTreePresent(SURFACE, MONITOR, now);
-                sentFrame = true;
-            }
         }
     }
 
-    if (sentFrame)
+    if (sentWindowFrame)
         lastRealtimePreviewFrame = now;
 
     realtimePreviewFrameQueued = false;
