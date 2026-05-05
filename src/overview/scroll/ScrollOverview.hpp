@@ -231,6 +231,10 @@ class CScrollOverview : public IOverview {
     SP<SWindowImage>                                      imageForWindow(PHLWINDOW w) const;
     SP<SWorkspaceImage>                                   workspaceAt(const Vector2D& local);
     SP<SWindowImage>                                      windowAt(const Vector2D& local);
+    SP<SWindowImage>                                      windowAtExact(const Vector2D& local);
+    SP<SWindowImage>                                      windowNear(const Vector2D& local);
+    CBox                                                  expandedWindowHitBox(const SP<SWindowImage>& image) const;
+    static double                                         distanceToBox(const Vector2D& point, const CBox& box);
 
     PHLWORKSPACE                                          startedOn;
 

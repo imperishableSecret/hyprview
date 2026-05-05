@@ -30,6 +30,8 @@ hv.configure {
         select_follows_hover = true,
         edge_navigation = true,
         edge_navigation_speed = 1.0,
+        hitbox_expansion = 16,
+        nearest_hitbox = true,
     },
 
     scrolling = {

@@ -220,6 +220,10 @@ namespace {
             return result;
         if (auto result = readLuaFloatField(L, tableIdx, "edge_navigation_speed", config.edgeNavigationSpeed); !result)
             return result;
+        if (auto result = readLuaIntField(L, tableIdx, "hitbox_expansion", config.hitboxExpansion); !result)
+            return result;
+        if (auto result = readLuaBoolField(L, tableIdx, "nearest_hitbox", config.nearestHitbox); !result)
+            return result;
 
         return {};
     }

@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <any>
 #include <cmath>
+#include <limits>
 
 #define private   public
 #define protected public
@@ -76,7 +77,7 @@ SP<CScrollOverview::SWorkspaceImage> CScrollOverview::workspaceAt(const Vector2D
     return nullptr;
 }
 
-SP<CScrollOverview::SWindowImage> CScrollOverview::windowAt(const Vector2D& local) {
+SP<CScrollOverview::SWindowImage> CScrollOverview::windowAtExact(const Vector2D& local) {
     for (auto wit = images.rbegin(); wit != images.rend(); ++wit) {
         const auto& wimg = *wit;
         if (!wimg || !wimg->hitBox.containsPoint(local))
@@ -90,6 +91,70 @@ SP<CScrollOverview::SWindowImage> CScrollOverview::windowAt(const Vector2D& loca
     }
 
     return nullptr;
+}
+
+double CScrollOverview::distanceToBox(const Vector2D& point, const CBox& box) {
+    if (box.empty())
+        return std::numeric_limits<double>::max();
+
+    const double dx = point.x < box.x ? box.x - point.x : (point.x > box.x + box.w ? point.x - (box.x + box.w) : 0.0);
+    const double dy = point.y < box.y ? box.y - point.y : (point.y > box.y + box.h ? point.y - (box.y + box.h) : 0.0);
+    return dx * dx + dy * dy;
+}
+
+CBox CScrollOverview::expandedWindowHitBox(const SP<SWindowImage>& image) const {
+    if (!image || image->overviewBox.empty())
+        return {};
+
+    const double EXPANSION = std::max(0.0, sc<double>(g_hyprviewConfig.mouse.hitboxExpansion));
+    CBox         box       = image->overviewBox;
+    box.x -= EXPANSION;
+    box.y -= EXPANSION;
+    box.w += EXPANSION * 2.0;
+    box.h += EXPANSION * 2.0;
+    return box;
+}
+
+SP<CScrollOverview::SWindowImage> CScrollOverview::windowNear(const Vector2D& local) {
+    if (g_hyprviewConfig.mouse.hitboxExpansion <= 0)
+        return nullptr;
+
+    SP<SWindowImage> best;
+    double           bestDistance = std::numeric_limits<double>::max();
+
+    for (auto wit = images.rbegin(); wit != images.rend(); ++wit) {
+        const auto& wimg = *wit;
+        if (!wimg)
+            continue;
+
+        for (auto it = wimg->windowImages.rbegin(); it != wimg->windowImages.rend(); ++it) {
+            const auto& img = *it;
+            if (!img || !img->pWindow)
+                continue;
+
+            const auto HITBOX = expandedWindowHitBox(img);
+            if (HITBOX.empty() || !HITBOX.containsPoint(local))
+                continue;
+
+            if (!g_hyprviewConfig.mouse.nearestHitbox)
+                return img;
+
+            const auto DISTANCE = distanceToBox(local, img->overviewBox);
+            if (DISTANCE < bestDistance) {
+                best         = img;
+                bestDistance = DISTANCE;
+            }
+        }
+    }
+
+    return best;
+}
+
+SP<CScrollOverview::SWindowImage> CScrollOverview::windowAt(const Vector2D& local) {
+    if (auto exact = windowAtExact(local))
+        return exact;
+
+    return windowNear(local);
 }
 
 SP<CScrollOverview::SWorkspaceImage> CScrollOverview::imageForWorkspace(PHLWORKSPACE w) {
