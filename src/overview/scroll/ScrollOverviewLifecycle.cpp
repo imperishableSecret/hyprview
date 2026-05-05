@@ -272,6 +272,9 @@ void CScrollOverview::close(bool switchToSelection) {
 }
 
 void CScrollOverview::onPreRender() {
+    if (pMonitor)
+        pMonitor->m_solitaryClient.reset();
+
     if (!closing) {
         damageDirty = false;
         if (redrawDirtyWindowImages())
