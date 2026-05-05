@@ -91,9 +91,12 @@ hl.plugin.hyprview.configure {
     mouse = {
         select_follows_hover = true,
         edge_navigation = true,
+        edge_navigation_snap = true,
         edge_navigation_speed = 1.0,
         hitbox_expansion = 16,
         nearest_hitbox = true,
+        snap_pan = true,
+        snap_pan_zone = 96,
     },
     scrolling = {
         scroll_moves_up_down = true,
@@ -183,10 +186,13 @@ Mouse options:
 | property | type | default | description |
 | --- | --- | --- | --- |
 | `select_follows_hover` | boolean | `true` | Pointer hover updates the selected thumbnail. Disable this if keyboard selection should stay fixed until keyboard navigation changes it. |
-| `edge_navigation` | boolean | `true` | Pointer motion near the top/bottom overview edge scrolls the workspace viewport. Disable this to rely on wheel input or right-click drag panning instead. |
-| `edge_navigation_speed` | float | `1.0` | Pointer edge-navigation speed multiplier. Higher values move through overview workspaces faster. |
+| `edge_navigation` | boolean | `true` | Pointer motion near the top/bottom overview edge moves the workspace viewport. Disable this to rely on wheel input or right-click drag panning instead. |
+| `edge_navigation_snap` | boolean | `true` | Move one workspace when the pointer enters the top/bottom edge zone, then wait until the pointer leaves and re-enters before moving again. Disable to restore continuous edge motion. |
+| `edge_navigation_speed` | float | `1.0` | Pointer edge-navigation speed multiplier used when `edge_navigation_snap = false`. Higher values move through overview workspaces faster. |
 | `hitbox_expansion` | integer | `16` | Extra logical pixels around each window thumbnail for pointer hit testing. Set to `0` to restore exact thumbnail-only hits. |
 | `nearest_hitbox` | boolean | `true` | If expanded hitboxes overlap, choose the nearest real thumbnail. If disabled, the first expanded hit in reverse render order wins. |
+| `snap_pan` | boolean | `true` | Enables pointer-driven horizontal snap panning for scrolling-layout workspace thumbnails. Right-click drag panning still works when this is disabled. |
+| `snap_pan_zone` | integer | `96` | Left/right screen edge size, in logical pixels, used for horizontal snap panning. |
 
 Scrolling options:
 
@@ -265,6 +271,8 @@ Insertion targets respect monitor-bound workspace rules. Existing target workspa
 | Normal Hyprland keybinds | Continue to focus or move windows. The overview queues refreshes and recenters from Hyprland workspace/window events. |
 
 While dragging a window, hovering a workspace body for `hover_activate_ms` centers that workspace. Moving the pointer into the top or bottom `edge_scroll_zone` autoscrolls through workspaces at `edge_scroll_speed`.
+
+Outside a drag, pointer workspace navigation is snap-based by default: entering the top or bottom edge zone moves one workspace and waits for the pointer to leave the zone before moving again. Scrolling-layout thumbnails also support horizontal snap panning from the left or right screen edge. A horizontal snap centers the next tiled thumbnail in that direction and waits until the pointer leaves the edge before snapping again. Right-click drag remains the manual continuous pan path.
 
 ## Gesture behavior
 
