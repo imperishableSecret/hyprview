@@ -182,6 +182,7 @@ class CScrollOverview : public IOverview {
     bool                     redrawDirtyWindowImages();
     bool                     markDirtyWindowImagesForDamage(const CRegion& damage);
     SOverviewSurfaceOwner    overviewSurfaceOwner(SP<CWLSurfaceResource> surface) const;
+    bool                     surfaceOwnerBelongsToOverviewMonitor(const SOverviewSurfaceOwner& owner, PHLMONITOR monitor) const;
     bool                     overviewWindowVisible(PHLWINDOW window) const;
     bool                     surfaceTreeHasFrameCallbacks(SP<CWLSurfaceResource> surface) const;
     void                     surfaceTreePresent(SP<CWLSurfaceResource> surface, PHLMONITOR monitor, const Time::steady_tp& now);

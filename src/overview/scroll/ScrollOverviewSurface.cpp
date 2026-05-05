@@ -55,6 +55,24 @@ CScrollOverview::SOverviewSurfaceOwner     CScrollOverview::overviewSurfaceOwner
     return {};
 }
 
+bool CScrollOverview::surfaceOwnerBelongsToOverviewMonitor(const SOverviewSurfaceOwner& owner, PHLMONITOR monitor) const {
+    if (!monitor || owner.type == eOverviewSurfaceOwner::UNKNOWN)
+        return false;
+
+    if (owner.monitor && owner.monitor != monitor)
+        return false;
+
+    if ((owner.type == eOverviewSurfaceOwner::LAYER || owner.type == eOverviewSurfaceOwner::LAYER_POPUP) && owner.layer) {
+        const auto LAYER_MONITOR = owner.layer->m_monitor.lock();
+        return !LAYER_MONITOR || LAYER_MONITOR == monitor;
+    }
+
+    if ((owner.type == eOverviewSurfaceOwner::WINDOW || owner.type == eOverviewSurfaceOwner::WINDOW_POPUP) && owner.window)
+        return owner.window->m_monitor == monitor;
+
+    return false;
+}
+
 bool CScrollOverview::overviewWindowVisible(PHLWINDOW window) const {
     if (!window || !pMonitor)
         return false;
@@ -106,8 +124,8 @@ bool CScrollOverview::shouldHandleSurfaceDamage(SP<CWLSurfaceResource> surface) 
     if (OWNER.type == eOverviewSurfaceOwner::UNKNOWN)
         return true;
 
-    if (OWNER.monitor && OWNER.monitor != MONITOR)
-        return false;
+    if (!surfaceOwnerBelongsToOverviewMonitor(OWNER, MONITOR))
+        return true;
 
     if (OWNER.type == eOverviewSurfaceOwner::LAYER || OWNER.type == eOverviewSurfaceOwner::LAYER_POPUP) {
         if (!OWNER.layer)
@@ -145,10 +163,13 @@ bool CScrollOverview::shouldAllowSurfaceFrame(SP<CWLSurfaceResource> surface, co
     if (OWNER.type == eOverviewSurfaceOwner::UNKNOWN)
         return true;
 
-    if (OWNER.type == eOverviewSurfaceOwner::LAYER || OWNER.type == eOverviewSurfaceOwner::LAYER_POPUP)
-        return !OWNER.monitor || OWNER.monitor == MONITOR;
+    if (!surfaceOwnerBelongsToOverviewMonitor(OWNER, MONITOR))
+        return true;
 
-    if (!OWNER.window || OWNER.window->m_monitor != MONITOR)
+    if (OWNER.type == eOverviewSurfaceOwner::LAYER || OWNER.type == eOverviewSurfaceOwner::LAYER_POPUP)
+        return true;
+
+    if (!OWNER.window)
         return true;
 
     if (!overviewWindowVisible(OWNER.window))
