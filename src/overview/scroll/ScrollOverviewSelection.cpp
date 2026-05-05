@@ -118,7 +118,7 @@ SP<CScrollOverview::SWindowImage> CScrollOverview::imageForKeyboardSelection() c
     return imageForWindow(WINDOW);
 }
 
-void CScrollOverview::ensureSelectionVisible(SP<SWindowImage> image) {
+void CScrollOverview::centerWindowImageInScrollingWorkspace(SP<SWindowImage> image, bool animate) {
     if (!pMonitor || !image || !image->pWindow || image->overviewBox.empty())
         return;
 
@@ -126,20 +126,16 @@ void CScrollOverview::ensureSelectionVisible(SP<SWindowImage> image) {
     if (!WORKSPACE || !workspaceUsesScrollingLayout(WORKSPACE->pWorkspace))
         return;
 
-    const double MARGIN = 24.0;
-    const double LEFT   = WORKSPACE->overviewBox.x + MARGIN;
-    const double RIGHT  = WORKSPACE->overviewBox.x + WORKSPACE->overviewBox.w - MARGIN;
-    double       delta  = 0.0;
-
-    if (image->overviewBox.x < LEFT)
-        delta = image->overviewBox.x - LEFT;
-    else if (image->overviewBox.x + image->overviewBox.w > RIGHT)
-        delta = image->overviewBox.x + image->overviewBox.w - RIGHT;
+    const double delta = image->overviewBox.middle().x - WORKSPACE->overviewBox.middle().x;
 
     if (std::abs(delta) < 0.5)
         return;
 
-    setHorizontalPanForWorkspace(WORKSPACE, horizontalPanForWorkspace(WORKSPACE) + delta / std::max(0.1F, scale->value()), true);
+    setHorizontalPanForWorkspace(WORKSPACE, horizontalPanForWorkspace(WORKSPACE) + delta / std::max(0.1F, scale->value()), animate);
+}
+
+void CScrollOverview::ensureSelectionVisible(SP<SWindowImage> image) {
+    centerWindowImageInScrollingWorkspace(image, true);
 }
 
 void CScrollOverview::setKeyboardSelection(SP<SWindowImage> image, bool lockedToKeyboard, bool damageOnChange) {
@@ -152,7 +148,11 @@ void CScrollOverview::setKeyboardSelection(SP<SWindowImage> image, bool lockedTo
         if (lockedToKeyboard) {
             rememberWindowSelection(WINDOW);
             keyboardTakeoverMouse();
+
             ensureSelectionVisible(image);
+
+            if (g_hyprviewConfig.keyboard.focusFollowsSelection && Desktop::focusState()->window() != WINDOW)
+                Desktop::focusState()->fullWindowFocus(WINDOW, Desktop::FOCUS_REASON_KEYBIND);
         }
     } else {
         keyboardSelectedWindow.reset();
@@ -167,6 +167,7 @@ void CScrollOverview::syncSelectionToViewport(bool damageOnChange) {
     if (!g_hyprviewConfig.keyboard.enabled) {
         setKeyboardSelection(nullptr, false, damageOnChange);
         rememberedSelection.clear();
+        restoredSelectionWorkspace.reset();
         return;
     }
 
@@ -174,10 +175,16 @@ void CScrollOverview::syncSelectionToViewport(bool damageOnChange) {
 
     if (images.empty() || viewportCurrentWorkspace >= images.size()) {
         setKeyboardSelection(nullptr, false, damageOnChange);
+        restoredSelectionWorkspace.reset();
         return;
     }
 
+    const auto OLD_SELECTION = keyboardSelectedWindow.lock();
     setKeyboardSelection(selectableImageForWorkspace(images[viewportCurrentWorkspace]), keyboardSelectionLocked, damageOnChange);
+
+    const auto NEW_SELECTION = keyboardSelectedWindow.lock();
+    if (OLD_SELECTION != NEW_SELECTION && NEW_SELECTION && NEW_SELECTION->m_workspace)
+        restoredSelectionWorkspace = NEW_SELECTION->m_workspace;
 }
 
 bool CScrollOverview::moveHorizontalSelection(bool right) {

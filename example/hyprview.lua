@@ -24,6 +24,7 @@ hv.configure {
         remember_selection = true,
         wrap = true,
         activation_closes_overview = true,
+        focus_follows_selection = false,
     },
 
     mouse = {
@@ -59,6 +60,8 @@ hv.configure {
         workspace_annotation_color = "rgba(ffffffff)",
         workspace_annotation_bg_col = "rgba(00000099)",
         workspace_annotation_font_size = 14,
+        active_indicator = "corner",
+        active_indicator_col = "rgba(ffffffff)",
         insertion_marker_labels = true,
         insertion_max_markers = 8,
         append_marker_count = 1,

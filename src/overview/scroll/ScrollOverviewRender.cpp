@@ -5,6 +5,7 @@
 #define protected public
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/config/ConfigValue.hpp>
+#include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/desktop/Workspace.hpp>
 #include <hyprland/src/desktop/view/Window.hpp>
 #undef protected
@@ -189,8 +190,26 @@ void CScrollOverview::renderWindowImage(SP<SWindowImage> img, const CBox& box, d
     g_pHyprOpenGL->renderTextureInternal(img->fb->getTexture(), texbox, renderData);
 }
 
+bool CScrollOverview::windowImageIsSelected(const SP<SWindowImage>& img) const {
+    if (!img || !img->pWindow)
+        return false;
+
+    if (!g_hyprviewConfig.keyboard.enabled)
+        return img->highlight;
+
+    return keyboardSelectedWindow && img->pWindow == keyboardSelectedWindow;
+}
+
+bool CScrollOverview::windowImageIsActive(const SP<SWindowImage>& img) const {
+    if (!img || !img->pWindow)
+        return false;
+
+    const auto ACTIVE = Desktop::focusState()->window();
+    return ACTIVE && img->pWindow == ACTIVE;
+}
+
 void CScrollOverview::renderFocusIndicator(SP<SWindowImage> img) {
-    if (!img || !img->highlight || img->overviewBox.empty() || !pMonitor)
+    if (!img || (!img->highlight && !windowImageIsSelected(img)) || img->overviewBox.empty() || !pMonitor)
         return;
 
     CBox texbox = img->overviewBox;
@@ -208,6 +227,65 @@ void CScrollOverview::renderFocusIndicator(SP<SWindowImage> img) {
     }
 
     g_pHyprOpenGL->renderRect(texbox, CHyprColor{g_hyprviewConfig.scrolling.hoverColor}, Render::GL::CHyprOpenGLImpl::SRectRenderData{.round = 5});
+}
+
+void CScrollOverview::renderActiveWindowIndicator(SP<SWindowImage> img) {
+    if (!windowImageIsActive(img) || img->overviewBox.empty() || !pMonitor)
+        return;
+
+    const std::string MODE = g_hyprviewConfig.scrolling.activeIndicator;
+    if (MODE == "none")
+        return;
+
+    const auto COLOR = CHyprColor{g_hyprviewConfig.scrolling.activeIndicatorColor};
+    if (COLOR.a <= 0.0)
+        return;
+
+    auto renderSolid = [this, COLOR](CBox box, int round = 2) {
+        if (box.empty())
+            return;
+
+        box.scale(pMonitor->m_scale).round();
+        g_pHyprOpenGL->renderRect(box, COLOR, Render::GL::CHyprOpenGLImpl::SRectRenderData{.round = round});
+    };
+
+    const double THICKNESS = std::clamp(sc<double>(g_hyprviewConfig.scrolling.activeBorderSize) * 0.75, 2.0, 10.0);
+    const double MARGIN    = std::max(3.0, THICKNESS);
+
+    if (MODE == "border") {
+        renderSolid({img->overviewBox.x, img->overviewBox.y, img->overviewBox.w, THICKNESS});
+        renderSolid({img->overviewBox.x, img->overviewBox.y + img->overviewBox.h - THICKNESS, img->overviewBox.w, THICKNESS});
+        renderSolid({img->overviewBox.x, img->overviewBox.y, THICKNESS, img->overviewBox.h});
+        renderSolid({img->overviewBox.x + img->overviewBox.w - THICKNESS, img->overviewBox.y, THICKNESS, img->overviewBox.h});
+        return;
+    }
+
+    if (MODE == "underline") {
+        renderSolid({img->overviewBox.x + MARGIN, img->overviewBox.y + img->overviewBox.h - THICKNESS - MARGIN, img->overviewBox.w - MARGIN * 2.0, THICKNESS}, sc<int>(THICKNESS));
+        return;
+    }
+
+    if (MODE == "dot") {
+        const double DOT_SIZE = std::clamp(std::min(img->overviewBox.w, img->overviewBox.h) * 0.08, 6.0, 14.0);
+        CBox         dot      = {img->overviewBox.x + img->overviewBox.w - DOT_SIZE - MARGIN, img->overviewBox.y + MARGIN, DOT_SIZE, DOT_SIZE};
+        renderSolid(dot, sc<int>(DOT_SIZE));
+        return;
+    }
+
+    const double LENGTH = std::clamp(std::min(img->overviewBox.w, img->overviewBox.h) * 0.18, 16.0, 42.0);
+    const double X      = img->overviewBox.x + MARGIN;
+    const double Y      = img->overviewBox.y + MARGIN;
+    const double R      = img->overviewBox.x + img->overviewBox.w - MARGIN;
+    const double B      = img->overviewBox.y + img->overviewBox.h - MARGIN;
+
+    renderSolid({X, Y, LENGTH, THICKNESS});
+    renderSolid({X, Y, THICKNESS, LENGTH});
+    renderSolid({R - LENGTH, Y, LENGTH, THICKNESS});
+    renderSolid({R - THICKNESS, Y, THICKNESS, LENGTH});
+    renderSolid({X, B - THICKNESS, LENGTH, THICKNESS});
+    renderSolid({X, B - LENGTH, THICKNESS, LENGTH});
+    renderSolid({R - LENGTH, B - THICKNESS, LENGTH, THICKNESS});
+    renderSolid({R - THICKNESS, B - LENGTH, THICKNESS, LENGTH});
 }
 
 void CScrollOverview::renderDropTargetFeedback() {
@@ -280,6 +358,7 @@ void CScrollOverview::fullRender() {
 
             renderWindowImage(img, img->overviewBox);
             renderFocusIndicator(img);
+            renderActiveWindowIndicator(img);
         }
         yoff += pMonitor->m_size.y * scale->value();
 

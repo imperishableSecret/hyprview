@@ -105,6 +105,7 @@ class CScrollOverview : public IOverview {
     SP<SWorkspaceImage>      workspaceImageForWindow(PHLWINDOW window) const;
     SP<SWorkspaceImage>      workspaceImageForWindowImage(const SP<SWindowImage>& image) const;
     void                     ensureSelectionVisible(SP<SWindowImage> image);
+    void                     centerWindowImageInScrollingWorkspace(SP<SWindowImage> image, bool animate = true);
     bool                     moveHorizontalSelection(bool right);
     bool                     moveViewportWorkspace(bool up);
     bool                     setViewportWorkspace(size_t index, bool warp = false, bool activate = false);
@@ -160,6 +161,9 @@ class CScrollOverview : public IOverview {
     bool                     markDirtyWindowImagesForDamage(const CRegion& damage);
     void                     renderWindowImage(SP<SWindowImage> img, const CBox& box, double alpha = 1.0);
     void                     renderFocusIndicator(SP<SWindowImage> img);
+    void                     renderActiveWindowIndicator(SP<SWindowImage> img);
+    bool                     windowImageIsSelected(const SP<SWindowImage>& img) const;
+    bool                     windowImageIsActive(const SP<SWindowImage>& img) const;
     void                     renderDropTargetFeedback();
     void                     renderDragPreview();
     CBox                     draggedWindowBox() const;
@@ -232,6 +236,7 @@ class CScrollOverview : public IOverview {
     PHLWORKSPACEREF                                       hoveredWorkspace;
     PHLWORKSPACEREF                                       pendingAnchorWorkspace;
     PHLWORKSPACEREF                                       mouseSnapPanWorkspace;
+    PHLWORKSPACEREF                                       restoredSelectionWorkspace;
 
     std::vector<SP<SWorkspaceImage>>                      images;
     SP<SWorkspaceImage>                                   imageForWorkspace(PHLWORKSPACE w);

@@ -18,6 +18,7 @@ Hyprview is a Hyprland plugin that adds a niri-like scrolling workspace overview
 | Wheel navigation | Wheel input moves between overview workspaces by default. It can be configured to zoom instead. |
 | Keyboard selection | Optional Lua-controlled selection dispatchers move the selected thumbnail left/right/up/down and activate it. |
 | Normal Hyprland keybinds | Workspace switching, focus movement, and moving windows between workspaces keep working while the overview is open. Hyprview refreshes and recenters from the resulting Hyprland events. |
+| Active/selected distinction | Hyprview selection uses the main overview indicator. The real Hyprland active window gets a configurable secondary marker so focus changes do not hide what the overview will activate. |
 | Trackpad gesture | Lua config can register a trackpad gesture that opens the overview when closed and drives overview scale while swiping. |
 | Workspace badges | Optional workspace annotations can show ID, name, ID/name combinations, or window count. |
 | Hover/focus styling | Hovered windows can use a translucent overview box or Hyprland's active border gradient. |
@@ -87,6 +88,7 @@ hl.plugin.hyprview.configure {
         remember_selection = true,
         wrap = true,
         activation_closes_overview = true,
+        focus_follows_selection = false,
     },
     mouse = {
         select_follows_hover = true,
@@ -120,6 +122,8 @@ hl.plugin.hyprview.configure {
         workspace_annotation_color = "rgba(ffffffff)",
         workspace_annotation_bg_col = "rgba(00000099)",
         workspace_annotation_font_size = 14,
+        active_indicator = "corner",
+        active_indicator_col = "rgba(ffffffff)",
         insertion_marker_labels = true,
         insertion_max_markers = 8,
         append_marker_count = 1,
@@ -180,6 +184,7 @@ Keyboard options:
 | `remember_selection` | boolean | `true` | Remembers the selected window per workspace and restores it when the viewport returns to that workspace. |
 | `wrap` | boolean | `true` | Allows left/right selection to wrap within a workspace and up/down selection to wrap between the first and last overview workspace. |
 | `activation_closes_overview` | boolean | `true` | `selection_activate` closes the overview after focusing the selected window. If disabled, it focuses the selected window and keeps the overview open. |
+| `focus_follows_selection` | boolean | `false` | Overview keyboard selection also focuses the selected Hyprland window. If disabled, selection is only an overview activation target until `selection_activate`. |
 
 Mouse options:
 
@@ -219,6 +224,8 @@ Scrolling options:
 | `workspace_annotation_color` | color | `rgba(ffffffff)` | Workspace badge and insertion label text color. |
 | `workspace_annotation_bg_col` | color | `rgba(00000099)` | Workspace badge background color. |
 | `workspace_annotation_font_size` | integer | `14` | Workspace badge and insertion label font size. Values below `1` render as `1`. |
+| `active_indicator` | string | `corner` | Active Hyprland window marker mode: `none`, `dot`, `corner`, `underline`, or `border`. Unknown values behave like `corner`. |
+| `active_indicator_col` | color | `rgba(ffffffff)` | Color used for the active Hyprland window marker. Alpha `0` hides the marker. |
 | `insertion_marker_labels` | boolean | `true` | Show target workspace IDs inside insertion markers. |
 | `insertion_max_markers` | integer | `8` | Maximum insertion markers shown for one numeric workspace gap. Values below `0` render as `0`. |
 | `append_marker_count` | integer | `1` | Number of append workspace markers after the last numeric workspace, clamped to `0..5`. |
@@ -271,6 +278,8 @@ Insertion targets respect monitor-bound workspace rules. Existing target workspa
 | Normal Hyprland keybinds | Continue to focus or move windows. The overview queues refreshes and recenters from Hyprland workspace/window events. |
 
 While dragging a window, hovering a workspace body for `hover_activate_ms` centers that workspace. Moving the pointer into the top or bottom `edge_scroll_zone` autoscrolls through workspaces at `edge_scroll_speed`.
+
+Hyprland focus changes always update Hyprview selection while the overview is open, so normal focus keybinds and overview selection agree on the current target. `focus_follows_selection` controls the opposite direction: when enabled, overview keyboard selection also moves real Hyprland focus immediately. The active Hyprland window is shown with `active_indicator`; if active and selected are the same window, the selected indicator remains primary and the active marker is drawn on top.
 
 Outside a drag, pointer workspace navigation is snap-based by default: entering the top or bottom edge zone moves one workspace and waits for the pointer to leave the zone before moving again. Scrolling-layout thumbnails also support horizontal snap panning from the left or right screen edge. A horizontal snap centers the next tiled thumbnail in that direction and waits until the pointer leaves the edge before snapping again. Right-click drag remains the manual continuous pan path.
 

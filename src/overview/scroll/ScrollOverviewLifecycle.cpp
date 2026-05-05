@@ -136,10 +136,34 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
         if (closing || !pMonitor || inputState.mode != ePointerMode::IDLE || !window || !window->m_workspace || window->m_workspace->m_monitor != pMonitor)
             return;
 
-        if (reason != Desktop::FOCUS_REASON_KEYBIND && reason != Desktop::FOCUS_REASON_DESKTOP_STATE_CHANGE)
+        if (reason != Desktop::FOCUS_REASON_KEYBIND)
             return;
 
+        rebuildGeometryCache();
+
+        if (images.empty() || viewportCurrentWorkspace >= images.size() || !images[viewportCurrentWorkspace] ||
+            images[viewportCurrentWorkspace]->pWorkspace != window->m_workspace) {
+            damage();
+            return;
+        }
+
+        if (const auto RESTORED = restoredSelectionWorkspace.lock(); RESTORED && RESTORED == window->m_workspace) {
+            const auto SELECTED = keyboardSelectedWindow.lock();
+            if (SELECTED && SELECTED != window && SELECTED->m_workspace == window->m_workspace) {
+                restoredSelectionWorkspace.reset();
+                damage();
+                return;
+            }
+        }
+
+        restoredSelectionWorkspace.reset();
+
+        if (const auto IMAGE = imageForWindow(window))
+            setKeyboardSelection(IMAGE, true, false);
+
         queueFocusedWindowCursorSync(window);
+
+        damage();
     };
 
     auto onWorkspaceActive = [this](PHLWORKSPACE workspace) {
@@ -192,6 +216,7 @@ void CScrollOverview::close(bool switchToSelection) {
 
     cancelPointerInteraction(false);
     pendingAnchorWorkspace.reset();
+    restoredSelectionWorkspace.reset();
     clearFocusedWindowCursorSync();
     releaseKeyboardTakeoverMouse(false);
     viewOffset->setCallbackOnEnd(nullptr);

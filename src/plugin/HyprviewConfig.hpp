@@ -25,6 +25,8 @@ struct SHyprviewScrollingConfig {
     int64_t     workspaceAnnotationColor    = 0xFFFFFFFF;
     int64_t     workspaceAnnotationBgColor  = 0x99000000;
     int         workspaceAnnotationFontSize = 14;
+    std::string activeIndicator             = "corner";
+    int64_t     activeIndicatorColor        = 0xFFFFFFFF;
     bool        insertionMarkerLabels       = true;
     int         insertionMaxMarkers         = 8;
     int         appendMarkerCount           = 1;
@@ -38,6 +40,7 @@ struct SHyprviewKeyboardConfig {
     bool rememberSelection        = true;
     bool wrap                     = true;
     bool activationClosesOverview = true;
+    bool focusFollowsSelection    = false;
 };
 
 struct SHyprviewMouseConfig {

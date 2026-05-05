@@ -184,6 +184,10 @@ namespace {
             return result;
         if (auto result = readLuaIntField(L, tableIdx, "workspace_annotation_font_size", config.workspaceAnnotationFontSize); !result)
             return result;
+        if (auto result = readLuaStringField(L, tableIdx, "active_indicator", config.activeIndicator); !result)
+            return result;
+        if (auto result = readLuaColorField(L, tableIdx, "active_indicator_col", config.activeIndicatorColor); !result)
+            return result;
         if (auto result = readLuaBoolField(L, tableIdx, "insertion_marker_labels", config.insertionMarkerLabels); !result)
             return result;
         if (auto result = readLuaIntField(L, tableIdx, "insertion_max_markers", config.insertionMaxMarkers); !result)
@@ -208,6 +212,8 @@ namespace {
         if (auto result = readLuaBoolField(L, tableIdx, "wrap", config.wrap); !result)
             return result;
         if (auto result = readLuaBoolField(L, tableIdx, "activation_closes_overview", config.activationClosesOverview); !result)
+            return result;
+        if (auto result = readLuaBoolField(L, tableIdx, "focus_follows_selection", config.focusFollowsSelection); !result)
             return result;
 
         return {};
