@@ -244,15 +244,6 @@ void CScrollOverview::close(bool switchToSelection) {
                                                       (FOCUSED_WINDOW && FOCUSED_WINDOW->m_workspace ? FOCUSED_WINDOW->m_workspace : pMonitor->m_activeWorkspace);
     const bool TARGET_IS_ACTIVE = (!TARGET_WINDOW || TARGET_WINDOW == FOCUSED_WINDOW) && TARGET_WORKSPACE == pMonitor->m_activeWorkspace;
 
-    if (TARGET_WINDOW) {
-        rebuildGeometryCache();
-        if (const auto IMAGE = imageForWindow(TARGET_WINDOW)) {
-            keyboardSelectedWindow = TARGET_WINDOW;
-            centerWindowImageInScrollingWorkspace(IMAGE, true);
-            rebuildGeometryCache();
-        }
-    }
-
     if (switchToSelection && !TARGET_IS_ACTIVE) {
         if (TARGET_WORKSPACE && TARGET_WORKSPACE != pMonitor->m_activeWorkspace) {
             g_pDesktopAnimationManager->startAnimation(pMonitor->m_activeWorkspace, CDesktopAnimationManager::ANIMATION_TYPE_OUT, true, true);
@@ -264,37 +255,16 @@ void CScrollOverview::close(bool switchToSelection) {
             Desktop::focusState()->fullWindowFocus(TARGET_WINDOW, Desktop::FOCUS_REASON_KEYBIND);
     }
 
-    size_t activeIdx = 0;
-    for (size_t i = 0; i < images.size(); ++i) {
-        if (images[i]->pWorkspace && images[i]->pWorkspace == startedOn) {
-            activeIdx = i;
-            break;
-        }
-    }
+    if (TARGET_WINDOW)
+        keyboardSelectedWindow = TARGET_WINDOW;
 
-    float yoff  = -(float)activeIdx * pMonitor->m_size.y * scale->value();
-    bool  found = !TARGET_WINDOW;
-    if (TARGET_WINDOW) {
-        for (const auto& wimg : images) {
-            for (const auto& img : wimg->windowImages) {
-                if (img->pWindow == TARGET_WINDOW) {
-                    const CBox TARGET_BOX{TARGET_WINDOW->m_realPosition->goal(), TARGET_WINDOW->m_realSize->goal()};
-                    Vector2D   middleOfWindow = CBox{TARGET_BOX}.translate({0.F, yoff / scale->value()}).middle() - CBox{pMonitor->m_position, pMonitor->m_size}.middle();
+    rebuildGeometryCache();
 
-                    // we need to do this because the window doesnt have to be centered after click
-                    *viewOffset = middleOfWindow + (CBox{pMonitor->m_position, pMonitor->m_size}.middle() - TARGET_BOX.middle());
-                    found       = true;
-                    break;
-                }
-            }
-            if (found)
-                break;
-            yoff += pMonitor->m_size.y * scale->value();
-        }
-    }
+    const auto FINAL_WORKSPACE = TARGET_WORKSPACE ? TARGET_WORKSPACE : pMonitor->m_activeWorkspace;
+    if (const auto WORKSPACE_IMAGE = imageForWorkspace(FINAL_WORKSPACE))
+        setHorizontalPanForWorkspace(WORKSPACE_IMAGE, 0.0, true);
 
-    if (!found)
-        *viewOffset = Vector2D{};
+    *viewOffset = Vector2D{};
 
     *scale = 1.F;
 
