@@ -141,10 +141,20 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
 
         rebuildGeometryCache();
 
-        if (images.empty() || viewportCurrentWorkspace >= images.size() || !images[viewportCurrentWorkspace] ||
-            images[viewportCurrentWorkspace]->pWorkspace != window->m_workspace) {
+        if (images.empty() || viewportCurrentWorkspace >= images.size() || !images[viewportCurrentWorkspace]) {
             damage();
             return;
+        }
+
+        if (images[viewportCurrentWorkspace]->pWorkspace != window->m_workspace) {
+            const auto WORKSPACE = workspaceImageForWindow(window);
+            if (!WORKSPACE) {
+                damage();
+                return;
+            }
+
+            focusWorkspaceInViewport(WORKSPACE, false, false);
+            rebuildGeometryCache();
         }
 
         if (const auto RESTORED = restoredSelectionWorkspace.lock(); RESTORED && RESTORED == window->m_workspace) {
@@ -289,7 +299,9 @@ void CScrollOverview::onPreRender() {
     if (!closing && cursorSyncUntilMs != 0 && inputState.mode == ePointerMode::IDLE) {
         const auto NOW = Time::millis(Time::steadyNow());
         if (NOW <= cursorSyncUntilMs) {
-            if (const auto WINDOW = queuedCursorWindow.lock(); centerCursorOnWindowImage(WINDOW))
+            const auto WINDOW = queuedCursorWindow.lock();
+
+            if (centerCursorOnWindowImage(WINDOW))
                 g_pCompositor->scheduleFrameForMonitor(pMonitor.lock());
         } else
             clearFocusedWindowCursorSync();

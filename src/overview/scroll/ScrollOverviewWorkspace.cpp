@@ -73,8 +73,8 @@ CScrollOverview::SWorkspacePanRange CScrollOverview::horizontalPanRangeForWorksp
         if (!img || !img->pWindow || img->pWindow->m_isFloating)
             continue;
 
-        const auto POS  = img->pWindow->m_realPosition->value() - pMonitor->m_position;
-        const auto SIZE = img->pWindow->m_realSize->value();
+        const auto POS  = img->pWindow->m_realPosition->goal() - pMonitor->m_position;
+        const auto SIZE = img->pWindow->m_realSize->goal();
 
         if (!foundTiled) {
             minX       = POS.x;

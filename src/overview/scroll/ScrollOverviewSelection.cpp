@@ -8,6 +8,7 @@
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/desktop/view/Window.hpp>
+#include <hyprland/src/helpers/Monitor.hpp>
 #undef protected
 #undef private
 
@@ -119,19 +120,27 @@ SP<CScrollOverview::SWindowImage> CScrollOverview::imageForKeyboardSelection() c
 }
 
 void CScrollOverview::centerWindowImageInScrollingWorkspace(SP<SWindowImage> image, bool animate) {
-    if (!pMonitor || !image || !image->pWindow || image->overviewBox.empty())
+    if (!pMonitor || !image || !image->pWindow)
+        return;
+
+    const auto WINDOW = image->pWindow.lock();
+    if (!WINDOW || WINDOW->m_isFloating || !WINDOW->m_realPosition || !WINDOW->m_realSize)
         return;
 
     const auto WORKSPACE = workspaceImageForWindowImage(image);
     if (!WORKSPACE || !workspaceUsesScrollingLayout(WORKSPACE->pWorkspace))
         return;
 
-    const double delta = image->overviewBox.middle().x - WORKSPACE->overviewBox.middle().x;
+    const auto   TARGET_POS    = WINDOW->m_realPosition->goal();
+    const auto   TARGET_SIZE   = WINDOW->m_realSize->goal();
+    const double TARGET_CENTER = TARGET_POS.x - pMonitor->m_position.x + TARGET_SIZE.x / 2.0;
+    const double TARGET_PAN    = TARGET_CENTER - pMonitor->m_size.x / 2.0;
+    const double delta         = TARGET_PAN - horizontalPanForWorkspace(WORKSPACE);
 
     if (std::abs(delta) < 0.5)
         return;
 
-    setHorizontalPanForWorkspace(WORKSPACE, horizontalPanForWorkspace(WORKSPACE) + delta / std::max(0.1F, scale->value()), animate);
+    setHorizontalPanForWorkspace(WORKSPACE, TARGET_PAN, animate);
 }
 
 void CScrollOverview::ensureSelectionVisible(SP<SWindowImage> image) {
