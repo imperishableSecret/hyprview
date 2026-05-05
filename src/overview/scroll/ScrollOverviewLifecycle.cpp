@@ -235,54 +235,66 @@ void CScrollOverview::close(bool switchToSelection) {
     if (!WAS_CLOSING)
         Hyprview::runOnCloseLuaCallback();
 
+    const auto FOCUSED_WINDOW = Desktop::focusState()->window();
     if (!closeOnWindow && !closeOnWorkspace)
-        closeOnWindow = Desktop::focusState()->window();
+        closeOnWindow = FOCUSED_WINDOW;
 
-    const auto TARGET_WORKSPACE = closeOnWindow && closeOnWindow->m_workspace ? closeOnWindow->m_workspace : closeOnWorkspace.lock();
+    const auto TARGET_WINDOW    = switchToSelection ? closeOnWindow.lock() : FOCUSED_WINDOW;
+    const auto TARGET_WORKSPACE = switchToSelection ? (closeOnWindow && closeOnWindow->m_workspace ? closeOnWindow->m_workspace : closeOnWorkspace.lock()) :
+                                                      (FOCUSED_WINDOW && FOCUSED_WINDOW->m_workspace ? FOCUSED_WINDOW->m_workspace : pMonitor->m_activeWorkspace);
+    const bool TARGET_IS_ACTIVE = (!TARGET_WINDOW || TARGET_WINDOW == FOCUSED_WINDOW) && TARGET_WORKSPACE == pMonitor->m_activeWorkspace;
 
-    if (!switchToSelection || (closeOnWindow && closeOnWindow == Desktop::focusState()->window()) || (!closeOnWindow && TARGET_WORKSPACE == pMonitor->m_activeWorkspace))
-        *viewOffset = Vector2D{};
-    else {
+    if (TARGET_WINDOW) {
+        rebuildGeometryCache();
+        if (const auto IMAGE = imageForWindow(TARGET_WINDOW)) {
+            keyboardSelectedWindow = TARGET_WINDOW;
+            centerWindowImageInScrollingWorkspace(IMAGE, true);
+            rebuildGeometryCache();
+        }
+    }
 
+    if (switchToSelection && !TARGET_IS_ACTIVE) {
         if (TARGET_WORKSPACE && TARGET_WORKSPACE != pMonitor->m_activeWorkspace) {
             g_pDesktopAnimationManager->startAnimation(pMonitor->m_activeWorkspace, CDesktopAnimationManager::ANIMATION_TYPE_OUT, true, true);
             g_pDesktopAnimationManager->startAnimation(TARGET_WORKSPACE, CDesktopAnimationManager::ANIMATION_TYPE_IN, false, true);
             pMonitor->changeWorkspace(TARGET_WORKSPACE, true, true, true);
         }
 
-        if (closeOnWindow)
-            Desktop::focusState()->fullWindowFocus(closeOnWindow.lock(), Desktop::FOCUS_REASON_KEYBIND);
+        if (TARGET_WINDOW)
+            Desktop::focusState()->fullWindowFocus(TARGET_WINDOW, Desktop::FOCUS_REASON_KEYBIND);
+    }
 
-        size_t activeIdx = 0;
-        for (size_t i = 0; i < images.size(); ++i) {
-            if (images[i]->pWorkspace && images[i]->pWorkspace == startedOn) {
-                activeIdx = i;
-                break;
-            }
-        }
-
-        float yoff  = -(float)activeIdx * pMonitor->m_size.y * scale->value();
-        bool  found = !closeOnWindow;
-        if (closeOnWindow) {
-            for (const auto& wimg : images) {
-                for (const auto& img : wimg->windowImages) {
-                    if (img->pWindow == closeOnWindow) {
-                        Vector2D middleOfWindow = CBox{img->pWindow->m_realPosition->value(), img->pWindow->m_realSize->value()}.translate({0.F, yoff / scale->value()}).middle() -
-                            CBox{pMonitor->m_position, pMonitor->m_size}.middle();
-
-                        // we need to do this because the window doesnt have to be centered after click
-                        *viewOffset = middleOfWindow +
-                            (CBox{pMonitor->m_position, pMonitor->m_size}.middle() - CBox{img->pWindow->m_realPosition->value(), img->pWindow->m_realSize->value()}.middle());
-                        found = true;
-                        break;
-                    }
-                }
-                if (found)
-                    break;
-                yoff += pMonitor->m_size.y * scale->value();
-            }
+    size_t activeIdx = 0;
+    for (size_t i = 0; i < images.size(); ++i) {
+        if (images[i]->pWorkspace && images[i]->pWorkspace == startedOn) {
+            activeIdx = i;
+            break;
         }
     }
+
+    float yoff  = -(float)activeIdx * pMonitor->m_size.y * scale->value();
+    bool  found = !TARGET_WINDOW;
+    if (TARGET_WINDOW) {
+        for (const auto& wimg : images) {
+            for (const auto& img : wimg->windowImages) {
+                if (img->pWindow == TARGET_WINDOW) {
+                    const CBox TARGET_BOX{TARGET_WINDOW->m_realPosition->goal(), TARGET_WINDOW->m_realSize->goal()};
+                    Vector2D   middleOfWindow = CBox{TARGET_BOX}.translate({0.F, yoff / scale->value()}).middle() - CBox{pMonitor->m_position, pMonitor->m_size}.middle();
+
+                    // we need to do this because the window doesnt have to be centered after click
+                    *viewOffset = middleOfWindow + (CBox{pMonitor->m_position, pMonitor->m_size}.middle() - TARGET_BOX.middle());
+                    found       = true;
+                    break;
+                }
+            }
+            if (found)
+                break;
+            yoff += pMonitor->m_size.y * scale->value();
+        }
+    }
+
+    if (!found)
+        *viewOffset = Vector2D{};
 
     *scale = 1.F;
 
