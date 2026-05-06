@@ -1,6 +1,10 @@
 #include "ScrollOverview.hpp"
+#include "../../plugin/Telemetry.hpp"
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <format>
+#include <string_view>
 #include <vector>
 #include <wlr-layer-shell-unstable-v1.hpp>
 
@@ -12,6 +16,7 @@
 #include <hyprland/src/desktop/view/LayerSurface.hpp>
 #include <hyprland/src/desktop/view/Popup.hpp>
 #include <hyprland/src/desktop/view/Window.hpp>
+#include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/managers/input/InputManager.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/render/pass/RendererHintsPassElement.hpp>
@@ -23,7 +28,10 @@ using Render::GL::g_pHyprOpenGL;
 using Render::RENDER_PASS_ALL;
 
 namespace {
-    void flushCurrentRenderPass(PHLMONITOR monitor) {
+    uint64_t g_currentTelemetryFrame = 0;
+    constexpr double MIN_LIVE_WINDOW_SIZE = 3.0;
+
+    void     flushCurrentRenderPass(PHLMONITOR monitor) {
         if (!monitor)
             return;
 
@@ -47,6 +55,69 @@ namespace {
             return false;
 
         return layer->m_realPosition->isBeingAnimated() || layer->m_realSize->isBeingAnimated() || layer->m_alpha->isBeingAnimated();
+    }
+
+    std::string_view boolText(bool value) {
+        return value ? "1" : "0";
+    }
+
+    std::string monitorName(PHLMONITOR monitor) {
+        return monitor ? monitor->m_name : "<none>";
+    }
+
+    std::string workspaceID(PHLWORKSPACE workspace) {
+        return workspace ? std::to_string(workspace->m_id) : "<none>";
+    }
+
+    std::string windowID(PHLWINDOW window) {
+        return window ? Hyprview::formatRawPtr(window.get()) : "0";
+    }
+
+    std::string surfaceState(SP<CWLSurfaceResource> surface) {
+        if (!surface)
+            return "surface=0 resource=0 texture=0 visibleRegion=<none>";
+
+        const auto HLSURFACE = Desktop::View::CWLSurface::fromResource(surface);
+        return std::format("surface={:x} resource=1 texture={} buffer={} size={} visibleRegion={}", reinterpret_cast<uintptr_t>(surface.get()),
+                           boolText(!!surface->m_current.texture), Hyprview::formatVector(surface->m_current.bufferSize), Hyprview::formatVector(surface->m_current.size),
+                           HLSURFACE ? Hyprview::formatRegion(HLSURFACE->m_visibleRegion) : "<no-hlsurface>");
+    }
+
+    std::string windowState(PHLWINDOW window) {
+        if (!window)
+            return "window=0";
+
+        const auto SURFACE   = window->wlSurface();
+        const auto RESOURCE  = SURFACE ? SURFACE->resource() : nullptr;
+        const auto WORKSPACE = window->m_workspace;
+        const auto MONITOR   = window->m_monitor.lock();
+
+        return std::format(
+            "window={:x} workspace={} monitor={} mapped={} hidden={} suspended={} visible={} validMapped={} floating={} pinned={} fullscreen={} group={} realPos={} goalPos={} "
+            "realSize={} goalSize={} {}",
+            reinterpret_cast<uintptr_t>(window.get()), workspaceID(WORKSPACE), monitorName(MONITOR), boolText(window->m_isMapped), boolText(window->isHidden()),
+            boolText(window->m_suspended), boolText(window->visible()), boolText(Desktop::View::validMapped(window)), boolText(window->m_isFloating), boolText(window->m_pinned),
+            boolText(window->isFullscreen()), boolText(!!window->m_group), Hyprview::formatVector(window->m_realPosition->value()),
+            Hyprview::formatVector(window->m_realPosition->goal()), Hyprview::formatVector(window->m_realSize->value()), Hyprview::formatVector(window->m_realSize->goal()),
+            surfaceState(RESOURCE));
+    }
+
+    void logWindowTelemetry(std::string_view event, PHLWINDOW window, const CBox& overviewBox, bool intersects, std::string_view reason = "") {
+        Hyprview::telemetryLog(std::format("frame={} event={} reason={} overviewBox={} intersects={} {}", g_currentTelemetryFrame, event, reason, Hyprview::formatBox(overviewBox),
+                                           boolText(intersects), windowState(window)));
+    }
+
+    bool overviewBoxTooSmallForLiveRender(const CBox& box) {
+        return box.w < MIN_LIVE_WINDOW_SIZE || box.h < MIN_LIVE_WINDOW_SIZE;
+    }
+
+    void projectWindowGeometryForLiveRender(PHLWINDOW window, PHLMONITOR monitor, const CBox& sourceBox) {
+        if (!window || !monitor)
+            return;
+
+        const Vector2D WORKSPACE_OFFSET = !window->m_pinned && window->m_workspace ? window->m_workspace->m_renderOffset->value() : Vector2D{};
+        window->m_realPosition->value() = monitor->m_position + sourceBox.pos() - WORKSPACE_OFFSET;
+        window->m_realSize->value()     = sourceBox.size();
     }
 }
 
@@ -112,17 +183,21 @@ void CScrollOverview::forceSurfaceVisibility(SP<CWLSurfaceResource> surface) {
 
     for (const auto& entry : forcedSurfaceVisibility) {
         if (entry.surface == surface) {
-            const auto SIZE = surface->m_current.bufferSize.x > 0 && surface->m_current.bufferSize.y > 0 ? surface->m_current.bufferSize : surface->m_current.size;
-            if (SIZE.x > 0 && SIZE.y > 0)
-                HLSURFACE->m_visibleRegion = CRegion{0, 0, SIZE.x, SIZE.y};
+            Hyprview::telemetryLog(std::format("frame={} event=force-surface-visibility-existing before={} {}", g_currentTelemetryFrame,
+                                               Hyprview::formatRegion(HLSURFACE->m_visibleRegion), surfaceState(surface)));
+            HLSURFACE->m_visibleRegion = {};
+            Hyprview::telemetryLog(std::format("frame={} event=force-surface-visibility-existing-after after={} {}", g_currentTelemetryFrame,
+                                               Hyprview::formatRegion(HLSURFACE->m_visibleRegion), surfaceState(surface)));
             return;
         }
     }
 
+    Hyprview::telemetryLog(std::format("frame={} event=force-surface-visibility-new stored={} {}", g_currentTelemetryFrame, Hyprview::formatRegion(HLSURFACE->m_visibleRegion),
+                                       surfaceState(surface)));
     forcedSurfaceVisibility.push_back({surface, HLSURFACE->m_visibleRegion});
-    const auto SIZE = surface->m_current.bufferSize.x > 0 && surface->m_current.bufferSize.y > 0 ? surface->m_current.bufferSize : surface->m_current.size;
-    if (SIZE.x > 0 && SIZE.y > 0)
-        HLSURFACE->m_visibleRegion = CRegion{0, 0, SIZE.x, SIZE.y};
+    HLSURFACE->m_visibleRegion = {};
+    Hyprview::telemetryLog(std::format("frame={} event=force-surface-visibility-new-after after={} {}", g_currentTelemetryFrame, Hyprview::formatRegion(HLSURFACE->m_visibleRegion),
+                                       surfaceState(surface)));
 }
 
 void CScrollOverview::forceWindowSurfaceVisibility(PHLWINDOW window) {
@@ -201,36 +276,78 @@ void CScrollOverview::restoreForcedWindowVisibility() {
 }
 
 bool CScrollOverview::renderWindowLive(PHLWINDOW window, const CBox& box, const Time::steady_tp& now, double alpha) {
-    const auto MONITOR = pMonitor.lock();
-    window             = overviewWindowToRender(window);
-    if (!MONITOR || !window || box.empty() || !overviewBoxIntersectsMonitor(box))
+    const auto MONITOR    = pMonitor.lock();
+    window                = overviewWindowToRender(window);
+    const bool INTERSECTS = overviewBoxIntersectsMonitor(box);
+    logWindowTelemetry("render-window-enter", window, box, INTERSECTS);
+
+    if (!MONITOR || !window || box.empty() || !INTERSECTS) {
+        logWindowTelemetry("render-window-skip", window, box, INTERSECTS, "invalid-monitor-window-or-box");
         return false;
+    }
+
+    if (overviewBoxTooSmallForLiveRender(box)) {
+        logWindowTelemetry("render-window-skip", window, box, INTERSECTS, "tiny-window");
+        return false;
+    }
 
     if (!windowImageRenderable(window)) {
         if (const auto IMAGE = imageForRenderedWindow(window); IMAGE && IMAGE->fb) {
+            logWindowTelemetry("render-window-fallback-snapshot", window, box, INTERSECTS, "not-live-renderable");
             renderWindowImage(IMAGE, box, alpha);
             return true;
         }
 
+        logWindowTelemetry("render-window-skip", window, box, INTERSECTS, "not-live-renderable-no-snapshot");
         return false;
     }
 
+    logWindowTelemetry("render-window-force-visible-before", window, box, INTERSECTS);
     forceWindowVisible(window);
     forceWindowSurfaceVisibility(window);
+    logWindowTelemetry("render-window-force-visible-after", window, box, INTERSECTS);
 
-    CBox renderBox = box;
+    const auto SAVED_POSITION = window->m_realPosition->value();
+    const auto SAVED_SIZE     = window->m_realSize->value();
+    auto       restoreWindowGeometry = Hyprutils::Utils::CScopeGuard([window, SAVED_POSITION, SAVED_SIZE] {
+        if (!window)
+            return;
+
+        window->m_realPosition->value() = SAVED_POSITION;
+        window->m_realSize->value()     = SAVED_SIZE;
+    });
+
+    const double ORIGINAL_WINDOW_WIDTH  = std::max(1.0, SAVED_SIZE.x * MONITOR->m_scale);
+    const double ORIGINAL_WINDOW_HEIGHT = std::max(1.0, SAVED_SIZE.y * MONITOR->m_scale);
+
+    CBox         renderBox = box;
     renderBox.scale(MONITOR->m_scale).round();
 
-    const double             WINDOW_WIDTH  = std::max(1.0, window->m_realSize->value().x * MONITOR->m_scale);
-    const double             WINDOW_HEIGHT = std::max(1.0, window->m_realSize->value().y * MONITOR->m_scale);
-    const float              RENDER_SCALE  = sc<float>(std::min(renderBox.w / WINDOW_WIDTH, renderBox.h / WINDOW_HEIGHT));
+    const float RENDER_SCALE = sc<float>(std::min(renderBox.w / ORIGINAL_WINDOW_WIDTH, renderBox.h / ORIGINAL_WINDOW_HEIGHT));
+    CBox        sourceBox    = box;
+    sourceBox.w              = SAVED_SIZE.x;
+    sourceBox.h              = SAVED_SIZE.y;
+    sourceBox.x              = box.x + box.w / 2.0 - sourceBox.w / 2.0;
+    sourceBox.y              = box.y + box.h / 2.0 - sourceBox.h / 2.0;
+
+    CBox sourceRenderBox = sourceBox;
+    sourceRenderBox.scale(MONITOR->m_scale).round();
+
+    const Vector2D RENDER_TRANSLATE = renderBox.pos() - sourceRenderBox.pos() * RENDER_SCALE;
+
+    Hyprview::telemetryLog(std::format("frame={} event=render-window-submit renderBox={} sourceBox={} sourceRenderBox={} monitorScale={:.3f} windowPixelSize={:.2f},{:.2f} "
+                                       "renderScale={:.5f} translate={} {}",
+                                       g_currentTelemetryFrame, Hyprview::formatBox(renderBox), Hyprview::formatBox(sourceBox), Hyprview::formatBox(sourceRenderBox),
+                                       MONITOR->m_scale, ORIGINAL_WINDOW_WIDTH, ORIGINAL_WINDOW_HEIGHT, RENDER_SCALE, Hyprview::formatVector(RENDER_TRANSLATE),
+                                       windowState(window)));
 
     Render::SRenderModifData modif;
     modif.modifs.emplace_back(Render::SRenderModifData::RMOD_TYPE_SCALE, RENDER_SCALE);
-    modif.modifs.emplace_back(Render::SRenderModifData::RMOD_TYPE_TRANSLATE, renderBox.pos());
+    modif.modifs.emplace_back(Render::SRenderModifData::RMOD_TYPE_TRANSLATE, RENDER_TRANSLATE);
 
+    projectWindowGeometryForLiveRender(window, MONITOR, sourceBox);
     g_pHyprRenderer->m_renderPass.add(makeUnique<CRendererHintsPassElement>(CRendererHintsPassElement::SData{.renderModif = modif}));
-    g_pHyprRenderer->renderWindow(window, MONITOR, now, true, RENDER_PASS_ALL, true, true);
+    g_pHyprRenderer->renderWindow(window, MONITOR, now, true, RENDER_PASS_ALL, false, true);
     g_pHyprRenderer->m_renderPass.add(makeUnique<CRendererHintsPassElement>(CRendererHintsPassElement::SData{.renderModif = Render::SRenderModifData{}}));
     flushCurrentRenderPass(MONITOR);
 
@@ -238,8 +355,42 @@ bool CScrollOverview::renderWindowLive(PHLWINDOW window, const CBox& box, const 
 }
 
 void CScrollOverview::renderWorkspaceLive(const SP<SWorkspaceImage>& workspaceImage, const Time::steady_tp& now) {
-    if (!workspaceImage || !workspaceImage->pWorkspace || workspaceImage->overviewBox.empty() || !overviewBoxIntersectsMonitor(workspaceImage->overviewBox))
+    if (!workspaceImage || !workspaceImage->pWorkspace || workspaceImage->overviewBox.empty()) {
+        Hyprview::telemetryLog(std::format("frame={} event=workspace-skip reason=invalid-workspace-image", g_currentTelemetryFrame));
         return;
+    }
+
+    const auto MONITOR = pMonitor.lock();
+
+    const bool WORKSPACE_INTERSECTS = overviewBoxIntersectsMonitor(workspaceImage->overviewBox);
+    const auto PAN_RANGE            = horizontalPanRangeForWorkspace(workspaceImage);
+    const auto PAN                  = horizontalPanForWorkspace(workspaceImage);
+    const auto INDEX                = workspaceImageIndex(workspaceImage->pWorkspace);
+    const auto SELECTED_WINDOW      = overviewWindowToRender(keyboardSelectedWindow.lock());
+    const auto ACTIVE_WINDOW        = overviewWindowToRender(Desktop::focusState()->window());
+    const auto SELECTED_IMAGE       = imageForRenderedWindow(SELECTED_WINDOW);
+    const auto ACTIVE_IMAGE         = imageForRenderedWindow(ACTIVE_WINDOW);
+    const bool SELECTED_IN_WORKSPACE =
+        SELECTED_WINDOW && windowBelongsToWorkspaceInOverview(SELECTED_WINDOW, workspaceImage->pWorkspace) && workspaceImageForWindowImage(SELECTED_IMAGE) == workspaceImage;
+    const bool ACTIVE_IN_WORKSPACE =
+        ACTIVE_WINDOW && windowBelongsToWorkspaceInOverview(ACTIVE_WINDOW, workspaceImage->pWorkspace) && workspaceImageForWindowImage(ACTIVE_IMAGE) == workspaceImage;
+
+    Hyprview::telemetryLog(
+        std::format("frame={} event=workspace-enter index={} workspace={} name={} scrolling={} overviewBox={} hitBox={} intersects={} pan={:.2f} panRange={:.2f},{:.2f} "
+                    "selected={} selectedWorkspace={} selectedInWorkspace={} selectedBox={} active={} activeWorkspace={} activeInWorkspace={} activeBox={} windows={}",
+                    g_currentTelemetryFrame, INDEX ? std::to_string(*INDEX) : "<none>", workspaceID(workspaceImage->pWorkspace), workspaceImage->pWorkspace->m_name,
+                    boolText(workspaceUsesScrollingLayout(workspaceImage->pWorkspace)), Hyprview::formatBox(workspaceImage->overviewBox),
+                    Hyprview::formatBox(workspaceImage->hitBox), boolText(WORKSPACE_INTERSECTS), PAN, PAN_RANGE.min, PAN_RANGE.max, windowID(SELECTED_WINDOW),
+                    workspaceID(SELECTED_WINDOW ? SELECTED_WINDOW->m_workspace : PHLWORKSPACE{}), boolText(SELECTED_IN_WORKSPACE),
+                    SELECTED_IN_WORKSPACE && SELECTED_IMAGE ? Hyprview::formatBox(SELECTED_IMAGE->overviewBox) : "<none>", windowID(ACTIVE_WINDOW),
+                    workspaceID(ACTIVE_WINDOW ? ACTIVE_WINDOW->m_workspace : PHLWORKSPACE{}), boolText(ACTIVE_IN_WORKSPACE),
+                    ACTIVE_IN_WORKSPACE && ACTIVE_IMAGE ? Hyprview::formatBox(ACTIVE_IMAGE->overviewBox) : "<none>", workspaceImage->windowImages.size()));
+
+    if (!WORKSPACE_INTERSECTS) {
+        Hyprview::telemetryLog(std::format("frame={} event=workspace-skip reason=outside-monitor workspace={} overviewBox={}", g_currentTelemetryFrame,
+                                           workspaceID(workspaceImage->pWorkspace), Hyprview::formatBox(workspaceImage->overviewBox)));
+        return;
+    }
 
     const auto WORKSPACE          = workspaceImage->pWorkspace;
     const bool WAS_VISIBLE        = WORKSPACE->m_visible;
@@ -254,20 +405,58 @@ void CScrollOverview::renderWorkspaceLive(const SP<SWorkspaceImage>& workspaceIm
 
     std::vector<PHLWINDOW> renderedWindows;
     const auto             DRAGGED_WINDOW = overviewWindowToRender(inputState.draggedWindow.lock());
+    size_t                 submittedWindows = 0;
+    size_t                 skippedState     = 0;
+    size_t                 skippedCull      = 0;
+    size_t                 skippedTiny      = 0;
+    size_t                 skippedDuplicate = 0;
 
     auto                   renderImage = [&](const SP<SWindowImage>& img) {
         if (!img)
             return;
 
-        const auto WINDOW = overviewWindowToRender(img->pWindow.lock());
-        if (!windowImageRenderable(WINDOW) || WINDOW == DRAGGED_WINDOW || (WINDOW->m_pinned && WINDOW->m_isFloating))
-            return;
+        const auto WINDOW     = overviewWindowToRender(img->pWindow.lock());
+        const bool RENDERABLE = windowImageRenderable(WINDOW);
+        const bool INTERSECTS = img ? overviewBoxIntersectsMonitor(img->overviewBox) : false;
+        const CBox CURRENT_RAW =
+            WINDOW && MONITOR && WINDOW->m_realPosition && WINDOW->m_realSize ? CBox{WINDOW->m_realPosition->value() - MONITOR->m_position, WINDOW->m_realSize->value()} : CBox{};
+        const CBox GOAL_RAW =
+            WINDOW && MONITOR && WINDOW->m_realPosition && WINDOW->m_realSize ? CBox{WINDOW->m_realPosition->goal() - MONITOR->m_position, WINDOW->m_realSize->goal()} : CBox{};
+        logWindowTelemetry("window-candidate", WINDOW, img ? img->overviewBox : CBox{}, INTERSECTS,
+                           std::format("renderable={} dragged={} pinnedFloating={} selected={} active={} workspaceMatch={} currentRaw={} goalRaw={} pan={:.2f} scale={:.5f}",
+                                       boolText(RENDERABLE), boolText(WINDOW == DRAGGED_WINDOW), boolText(WINDOW && WINDOW->m_pinned && WINDOW->m_isFloating),
+                                       boolText(WINDOW && WINDOW == SELECTED_WINDOW), boolText(WINDOW && WINDOW == ACTIVE_WINDOW),
+                                       boolText(WINDOW && windowBelongsToWorkspaceInOverview(WINDOW, workspaceImage->pWorkspace)), Hyprview::formatBox(CURRENT_RAW),
+                                       Hyprview::formatBox(GOAL_RAW), PAN, scale->value()));
 
-        if (std::ranges::find(renderedWindows, WINDOW) != renderedWindows.end())
+        if (!RENDERABLE || WINDOW == DRAGGED_WINDOW || (WINDOW->m_pinned && WINDOW->m_isFloating)) {
+            ++skippedState;
+            logWindowTelemetry("window-candidate-skip", WINDOW, img ? img->overviewBox : CBox{}, INTERSECTS,
+                               !RENDERABLE ? "not-live-renderable" : (WINDOW == DRAGGED_WINDOW ? "dragged-window" : "pinned-floating"));
             return;
+        }
+
+        if (std::ranges::find(renderedWindows, WINDOW) != renderedWindows.end()) {
+            ++skippedDuplicate;
+            logWindowTelemetry("window-candidate-skip", WINDOW, img->overviewBox, INTERSECTS, "duplicate-rendered-window");
+            return;
+        }
+
+        if (!INTERSECTS) {
+            ++skippedCull;
+            logWindowTelemetry("window-candidate-skip", WINDOW, img->overviewBox, INTERSECTS, "outside-monitor");
+            return;
+        }
+
+        if (overviewBoxTooSmallForLiveRender(img->overviewBox)) {
+            ++skippedTiny;
+            logWindowTelemetry("window-candidate-skip", WINDOW, img->overviewBox, INTERSECTS, "tiny-window");
+            return;
+        }
 
         renderedWindows.emplace_back(WINDOW);
-        renderWindowLive(WINDOW, img->overviewBox, now);
+        if (renderWindowLive(WINDOW, img->overviewBox, now))
+            ++submittedWindows;
     };
 
     const auto FULLSCREEN_WINDOW = overviewWindowToRender(WORKSPACE->getFullscreenWindow());
@@ -298,6 +487,9 @@ void CScrollOverview::renderWorkspaceLive(const SP<SWorkspaceImage>& workspaceIm
     renderByState(false, true);
     renderByState(true, false);
     renderByState(true, true);
+
+    Hyprview::telemetryLog(std::format("frame={} event=workspace-render-summary workspace={} submitted={} skippedState={} skippedCull={} skippedTiny={} skippedDuplicate={}",
+                                       g_currentTelemetryFrame, workspaceID(workspaceImage->pWorkspace), submittedWindows, skippedState, skippedCull, skippedTiny, skippedDuplicate));
 }
 
 void CScrollOverview::renderDraggedWindowLive(const Time::steady_tp& now) {
@@ -412,6 +604,17 @@ void CScrollOverview::renderOverviewLive(const Time::steady_tp& now) {
         return;
 
     rebuildGeometryCache();
+    ++g_currentTelemetryFrame;
+
+    Hyprview::telemetryLog(
+        std::format("frame={} event=overview-start monitor={} monitorSize={} monitorPixel={} scale={:.5f} viewOffset={} images={} activeIndex={} viewportIndex={} closing={} "
+                    "swipe={} selected={} selectedWorkspace={} active={} activeWorkspace={}",
+                    g_currentTelemetryFrame, monitorName(MONITOR), Hyprview::formatVector(MONITOR->m_size), Hyprview::formatVector(MONITOR->m_pixelSize), scale->value(),
+                    Hyprview::formatVector(viewOffset->value()), images.size(), activeWorkspaceImageIndex(), viewportCurrentWorkspace, boolText(closing), boolText(swipe),
+                    windowID(overviewWindowToRender(keyboardSelectedWindow.lock())),
+                    workspaceID(keyboardSelectedWindow && keyboardSelectedWindow->m_workspace ? keyboardSelectedWindow->m_workspace : PHLWORKSPACE{}),
+                    windowID(overviewWindowToRender(Desktop::focusState()->window())),
+                    workspaceID(Desktop::focusState()->window() && Desktop::focusState()->window()->m_workspace ? Desktop::focusState()->window()->m_workspace : PHLWORKSPACE{})));
 
     {
         const bool PREVIOUS_BLOCK_SURFACE_FEEDBACK = g_pHyprRenderer->m_bBlockSurfaceFeedback;
@@ -471,4 +674,5 @@ void CScrollOverview::renderOverviewLive(const Time::steady_tp& now) {
     }
 
     renderHyprlandLayerPhase(now);
+    Hyprview::telemetryLog(std::format("frame={} event=overview-end", g_currentTelemetryFrame));
 }
