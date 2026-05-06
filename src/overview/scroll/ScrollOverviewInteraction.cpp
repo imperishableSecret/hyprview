@@ -655,11 +655,22 @@ CScrollOverview::SDropTarget CScrollOverview::dropTargetAt(const Vector2D& local
             return {.type = eDropTargetType::WORKSPACE_INSERTION, .markerBox = it->box, .targetWorkspaceID = it->workspaceID, .label = it->label};
     }
 
-    const auto WORKSPACE = workspaceAt(local);
-    if (!WORKSPACE || !WORKSPACE->pWorkspace)
-        return {};
+    const auto DRAG_WINDOW       = inputState.windowDrag ? inputState.windowDrag->window.lock() : PHLWINDOW{};
+    const bool DRAGGING_FLOATING = DRAG_WINDOW && DRAG_WINDOW->layoutTarget() && DRAG_WINDOW->layoutTarget()->floating();
 
-    return {.type = eDropTargetType::WORKSPACE_BODY, .workspace = WORKSPACE, .markerBox = WORKSPACE->overviewBox};
+    for (auto it = workspaceEntries.rbegin(); it != workspaceEntries.rend(); ++it) {
+        const auto& WORKSPACE = *it;
+        if (!WORKSPACE || !WORKSPACE->pWorkspace)
+            continue;
+
+        const auto DROP_BOX = DRAGGING_FLOATING ? WORKSPACE->overviewBox : workspaceDropBox(WORKSPACE);
+        if (DROP_BOX.empty() || !DROP_BOX.containsPoint(local))
+            continue;
+
+        return {.type = eDropTargetType::WORKSPACE_BODY, .workspace = WORKSPACE, .markerBox = DROP_BOX};
+    }
+
+    return {};
 }
 
 bool CScrollOverview::finishWindowDrag() {
@@ -680,6 +691,24 @@ void CScrollOverview::cancelPointerInteraction(bool damageOnChange) {
 
     if (damageOnChange && HAD_INTERACTION)
         damage();
+}
+
+CBox CScrollOverview::workspaceDropBox(const SP<SWorkspaceEntry>& workspace) const {
+    if (!workspace || !workspace->pWorkspace)
+        return {};
+
+    CBox box = workspace->overviewBox;
+    if (!workspaceUsesScrollingLayout(workspace->pWorkspace))
+        return box;
+
+    const auto   RANGE = horizontalPanRangeForWorkspace(workspace);
+    const double PAN   = horizontalPanForWorkspace(workspace);
+    const double SCALE = std::max(0.01, scale ? sc<double>(scale->value()) : 1.0);
+
+    box.x -= std::max(0.0, PAN - RANGE.min) * SCALE;
+    box.w += std::max(0.0, RANGE.max - RANGE.min) * SCALE;
+
+    return box;
 }
 
 SP<CScrollOverview::SWindowEntry> CScrollOverview::dropAnchorEntry(const SP<SWorkspaceEntry>& workspace, PHLWINDOW ignoredWindow, CBox* anchorBox) const {

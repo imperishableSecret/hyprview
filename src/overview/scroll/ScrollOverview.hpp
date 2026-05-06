@@ -183,6 +183,7 @@ class CScrollOverview : public IOverview {
     bool                     finishWindowDrag();
     void                     cancelPointerInteraction(bool damageOnChange = true);
     bool                     hasDropTarget() const;
+    CBox                     workspaceDropBox(const SP<SWorkspaceEntry>& workspace) const;
     SP<SWindowEntry>         dropAnchorEntry(const SP<SWorkspaceEntry>& workspace, PHLWINDOW ignoredWindow, CBox* anchorBox = nullptr) const;
     Vector2D                 overviewPointToGlobal(const SP<SWorkspaceEntry>& workspace, const Vector2D& local) const;
     CBox                     floatingDropGlobalBox(PHLWINDOW window, PHLWORKSPACE targetWorkspace, const SP<SWorkspaceEntry>& targetEntry) const;

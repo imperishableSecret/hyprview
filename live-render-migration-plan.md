@@ -70,7 +70,7 @@ Hyprview's live architecture has one source of visual truth: Hyprland surfaces.
 | Hyprland blur | Background blur uses Hyprland's monitor blur path. |
 | Config additions | `scrolling.show_workspace_layers` and `scrolling.workspace_gap` are documented and implemented. |
 | Snapshot removal start | Per-window framebuffer allocation and redraw paths were removed from the current live records path. |
-| Live drag geometry | Drag/drop stores explicit live drag state, renders dragged previews from live window geometry, repositions floating windows from overview drops, and commits tiled drops through Hyprland layout targets. |
+| Live drag geometry | Drag/drop stores explicit live drag state, renders dragged previews from live window geometry, keeps floating drops inside the visible card because Hyprland floating placement is workarea-based, and commits tiled drops through Hyprland layout targets with scrolling-tape anchors. |
 
 ## Phase details
 
@@ -106,14 +106,14 @@ Work:
 - Compute drag preview from current live entry geometry, falling back only to the stored source geometry from the same live drag state.
 - Map floating drop boxes from overview coordinates back to target workspace global coordinates and clamp them to the workspace.
 - Commit tiled drops through layout targets: scrolling layouts move columns/rows directly, while other tiled layouts use Hyprland target switching when an anchor window is selected.
-- Keep drop target feedback based on live workspace/card boxes.
+- Keep drop target feedback based on the resolved live workspace drop box, including the full scrolling tape for scrolling workspaces.
 - Ensure dragged floating and tiled windows preserve scale, border, and clipping behavior.
 - Keep drag render ordering explicit: normal cards, normal windows, drop feedback, dragged live window, top/overlay layers.
 
 Exit criteria:
 
 - Dragging a tiled window between scrolling workspaces uses live content during the drag and commits through layout-aware workspace/target movement.
-- Dragging a floating window preserves visible geometry and lands at the dropped overview position when the drop target has workspace-card geometry.
+- Dragging a floating window preserves visible geometry and lands at the dropped overview position when the drop target has workspace-card or scrolling-tape geometry.
 - Drop target feedback does not depend on retired image fields.
 
 ## Phase C: Optimize live visibility and render culling
