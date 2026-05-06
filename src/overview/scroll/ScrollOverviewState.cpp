@@ -1,4 +1,5 @@
 #include "ScrollOverview.hpp"
+#include "../../plugin/Telemetry.hpp"
 #include <algorithm>
 #include <any>
 #include <cmath>
@@ -19,12 +20,22 @@
 
 static constexpr uint64_t FOCUS_CURSOR_SYNC_MS = 220;
 
-void                      CScrollOverview::refreshWorkspaceImages(PHLWORKSPACE preferredViewport, bool warpViewport) {
+namespace {
+    std::string workspaceID(PHLWORKSPACE workspace) {
+        return workspace ? std::to_string(workspace->m_id) : "<none>";
+    }
+}
+
+void CScrollOverview::refreshWorkspaceImages(PHLWORKSPACE preferredViewport, bool warpViewport) {
     if (!pMonitor)
         return;
 
     const auto FALLBACK_VIEWPORT =
         !preferredViewport && viewportCurrentWorkspace < images.size() && images[viewportCurrentWorkspace] ? images[viewportCurrentWorkspace]->pWorkspace : PHLWORKSPACE{};
+
+    Hyprview::telemetryLog(std::format("event=refresh-workspaces-start preferred={} fallback={} warp={} oldImages={} viewportIndex={} activeWorkspace={}",
+                                       workspaceID(preferredViewport), workspaceID(FALLBACK_VIEWPORT), Hyprview::boolToken(warpViewport), images.size(), viewportCurrentWorkspace,
+                                       workspaceID(pMonitor->m_activeWorkspace)));
 
     images.clear();
 
@@ -35,6 +46,14 @@ void                      CScrollOverview::refreshWorkspaceImages(PHLWORKSPACE p
 
     std::sort(images.begin(), images.end(), [](const auto& a, const auto& b) { return a->pWorkspace->m_id < b->pWorkspace->m_id; });
     pruneWorkspaceContentPans();
+
+    for (size_t i = 0; i < images.size(); ++i) {
+        const auto& IMAGE = images[i];
+        Hyprview::telemetryLog(std::format("event=refresh-workspace-image index={} workspace={} name={} displayable={} scrolling={}", i,
+                                           workspaceID(IMAGE ? IMAGE->pWorkspace : PHLWORKSPACE{}), IMAGE && IMAGE->pWorkspace ? IMAGE->pWorkspace->m_name : "<none>",
+                                           Hyprview::boolToken(IMAGE && workspaceHasDisplayableWindows(IMAGE->pWorkspace)),
+                                           Hyprview::boolToken(IMAGE && workspaceUsesScrollingLayout(IMAGE->pWorkspace))));
+    }
 
     refreshingWorkspaceImages = true;
     redrawAll();
@@ -61,6 +80,13 @@ void                      CScrollOverview::refreshWorkspaceImages(PHLWORKSPACE p
         if (!movedViewport)
             normalizeViewportAnchor(VIEWPORT_WORKSPACE);
     }
+
+    Hyprview::telemetryLog(std::format(
+        "event=refresh-workspaces-end images={} viewportIndex={} viewportWorkspace={} viewOffset={} centeredPreferred={} movedViewport={} "
+        "normalizeAnchor={}",
+        images.size(), viewportCurrentWorkspace,
+        workspaceID(viewportCurrentWorkspace < images.size() && images[viewportCurrentWorkspace] ? images[viewportCurrentWorkspace]->pWorkspace : PHLWORKSPACE{}),
+        Hyprview::formatVector(viewOffset->value()), Hyprview::boolToken(centeredPreferred), Hyprview::boolToken(movedViewport), Hyprview::boolToken(NORMALIZE_ANCHOR)));
 
     damage();
 }

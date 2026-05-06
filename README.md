@@ -104,7 +104,9 @@ hl.plugin.hyprview.configure {
         scroll_moves_up_down = true,
         default_zoom = 0.5,
         window_gap = 0,
+        workspace_gap = 0,
         background_blur = false,
+        show_workspace_layers = true,
         backdrop_col = "rgba(000000ff)",
         workspace_shadow_col = "rgba(00000000)",
         workspace_shadow_size = 0,
@@ -206,8 +208,10 @@ Scrolling options:
 | `scroll_moves_up_down` | boolean | `true` | If enabled, vertical wheel/scroll input moves between overview workspaces. If disabled, wheel/scroll input changes zoom. |
 | `default_zoom` | float | `0.5` | Default overview zoom, clamped to `0.1..0.9` when opening or completing a gesture. |
 | `window_gap` | integer | `0` | Visual gap between window thumbnails. Values below `0` render as `0`. |
-| `background_blur` | boolean | `false` | Capture and blur the workspace background manually instead of using the default captured background. |
-| `backdrop_col` | color | `rgba(000000ff)` | Color drawn behind overview thumbnails and any captured backdrop texture. |
+| `workspace_gap` | integer | `0` | Visual gap between workspace cards in the overview stack. Values below `0` render as `0`. |
+| `background_blur` | boolean | `false` | Blur the live backdrop after layer-shell background surfaces are rendered. |
+| `show_workspace_layers` | boolean | `true` | Render background and bottom layer-shell surfaces inside each workspace card. |
+| `backdrop_col` | color | `rgba(000000ff)` | Base color drawn before live backdrop layers and behind overview thumbnails. |
 | `workspace_shadow_col` | color | `rgba(00000000)` | Optional shadow color behind workspace thumbnails. Alpha `0` disables visible shadows. |
 | `workspace_shadow_size` | integer | `0` | Shadow expansion around workspace thumbnails. Values below `0` render as `0`. |
 | `focus_indicator` | string | `overview_box` | `overview_box` draws the hover color over the selected thumbnail. `active_border` draws Hyprland's active border gradient. Other values fall back to `overview_box`. |
@@ -344,13 +348,13 @@ Overview actions:
 
 Hyprview hooks Hyprland workspace rendering and monitor damage reporting while the overview is open. Normal workspace rendering is replaced by the overview render pass for the overview monitor only.
 
-Window thumbnails are rendered into offscreen framebuffers using Hyprland's fake render path. X11 windows are considered renderable when mapped. Wayland windows require a current surface texture.
+Live overview rendering projects real Hyprland windows and layer-shell surfaces into overview geometry. X11 windows are considered renderable when mapped. Wayland windows require a current surface texture.
 
-Damage is translated into monitor logical coordinates so only affected thumbnails are marked dirty when possible. Full damage reporting marks all renderable thumbnails dirty.
+The live backdrop clears to `backdrop_col`, renders `BACKGROUND` layer-shell surfaces through Hyprland's normal `renderLayer` path, then optionally uses Hyprland's `preBlurForCurrentMonitor` and monitor `m_blurFB` resource when `background_blur = true`.
 
-The overview pass reports a full-monitor bounding box and opaque region. It does not request live blur or precomputed blur from the pass element; the optional blurred background is captured manually into the overview background framebuffer. Background capture happens during overview image refresh, not as a continuously live background stream.
+When `show_workspace_layers = true`, `BACKGROUND` and `BOTTOM` layer-shell surfaces are also rendered inside each workspace card before window content. `TOP` and `OVERLAY` layers, layer popups, IME popups, and drag icons render above the overview in the native layer phase.
 
-The background framebuffer and window framebuffers use `ABGR8888`. The overview clears window thumbnails transparent before rendering each window image.
+The older snapshot/background framebuffer path still exists for the remaining migration work and will be removed once the live render migration is complete.
 
 ## Known quirks
 

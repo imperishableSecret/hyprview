@@ -1,4 +1,5 @@
 #include "ScrollOverview.hpp"
+#include "../../plugin/HyprviewConfig.hpp"
 #include <algorithm>
 #include <any>
 #include <cmath>
@@ -100,7 +101,7 @@ void CScrollOverview::syncViewportWorkspaceFromOffset(const Vector2D& offset) {
         return;
 
     const auto ACTIVE_INDEX = activeWorkspaceImageIndex();
-    const auto REL_INDEX    = offset.y / pMonitor->m_size.y + sc<double>(ACTIVE_INDEX);
+    const auto REL_INDEX    = offset.y / workspaceOverviewStep() + sc<double>(ACTIVE_INDEX);
     const auto INDEX        = sc<int64_t>(std::llround(REL_INDEX));
 
     viewportCurrentWorkspace = sc<size_t>(std::clamp<int64_t>(INDEX, 0, sc<int64_t>(images.size() - 1)));
@@ -121,12 +122,21 @@ void CScrollOverview::activateWorkspace(PHLWORKSPACE workspace, bool focus) {
     pMonitor->changeWorkspace(workspace, false, true, !focus);
 }
 
+double CScrollOverview::workspaceOverviewStep() const {
+    if (!pMonitor)
+        return 0.0;
+
+    const double SCALE         = std::max(sc<double>(scale->value()), 0.001);
+    const double WORKSPACE_GAP = std::max(0.0, sc<double>(g_hyprviewConfig.scrolling.workspaceGap)) * overviewStyleProgress();
+    return pMonitor->m_size.y + WORKSPACE_GAP / SCALE;
+}
+
 double CScrollOverview::viewOffsetForWorkspaceIndex(size_t index) const {
     if (!pMonitor || images.empty())
         return 0.0;
 
     const auto ACTIVE_INDEX = activeWorkspaceImageIndex();
-    return (sc<double>(index) - sc<double>(ACTIVE_INDEX)) * pMonitor->m_size.y;
+    return (sc<double>(index) - sc<double>(ACTIVE_INDEX)) * workspaceOverviewStep();
 }
 
 Vector2D CScrollOverview::clampedViewOffset(Vector2D offset) const {
@@ -134,8 +144,9 @@ Vector2D CScrollOverview::clampedViewOffset(Vector2D offset) const {
         return offset;
 
     const auto ACTIVE_INDEX = activeWorkspaceImageIndex();
-    const auto MIN_Y        = -sc<double>(ACTIVE_INDEX) * pMonitor->m_size.y;
-    const auto MAX_Y        = sc<double>(images.size() - 1 - ACTIVE_INDEX) * pMonitor->m_size.y;
+    const auto STEP         = workspaceOverviewStep();
+    const auto MIN_Y        = -sc<double>(ACTIVE_INDEX) * STEP;
+    const auto MAX_Y        = sc<double>(images.size() - 1 - ACTIVE_INDEX) * STEP;
 
     offset.x = 0.0;
     offset.y = std::clamp(offset.y, MIN_Y, MAX_Y);

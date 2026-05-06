@@ -1,6 +1,10 @@
 #include "ScrollOverview.hpp"
+#include "../../plugin/Telemetry.hpp"
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
+#include <format>
+#include <string_view>
 #include <utility>
 #include <vector>
 #include <wayland-server-core.h>
@@ -147,38 +151,77 @@ bool CScrollOverview::shouldHandleSurfaceDamage(SP<CWLSurfaceResource> surface) 
     if (OWNER.type == eOverviewSurfaceOwner::UNKNOWN)
         return true;
 
-    if (!surfaceOwnerBelongsToOverviewMonitor(OWNER, MONITOR))
+    auto ownerName = [](eOverviewSurfaceOwner type) -> std::string_view {
+        switch (type) {
+            case eOverviewSurfaceOwner::WINDOW: return "window";
+            case eOverviewSurfaceOwner::LAYER: return "layer";
+            case eOverviewSurfaceOwner::WINDOW_POPUP: return "window-popup";
+            case eOverviewSurfaceOwner::LAYER_POPUP: return "layer-popup";
+            case eOverviewSurfaceOwner::UNKNOWN: break;
+        }
+
+        return "unknown";
+    };
+
+    auto logDecision = [&](bool allow, std::string_view reason) {
+        const auto WINDOW        = overviewWindowToRender(OWNER.window);
+        const auto IMAGE         = imageForRenderedWindow(WINDOW);
+        const auto LAYER_MONITOR = OWNER.layer ? OWNER.layer->m_monitor.lock() : PHLMONITOR{};
+        Hyprview::telemetryLog(std::format(
+            "event=surface-damage-decision allow={} reason={} owner={} surface={:x} overviewMonitor={} ownerMonitor={} window={:x} windowWorkspace={} image={} imageBox={} "
+            "imageIntersects={} occluded={} layer={:x} layerNs={} layerLevel={} layerMapped={} layerValidMapped={}",
+            allow ? 1 : 0, reason, ownerName(OWNER.type), reinterpret_cast<uintptr_t>(surface.get()), MONITOR ? MONITOR->m_name : "<none>",
+            OWNER.monitor ? OWNER.monitor->m_name : "<none>", WINDOW ? reinterpret_cast<uintptr_t>(WINDOW.get()) : 0,
+            WINDOW && WINDOW->m_workspace ? std::to_string(WINDOW->m_workspace->m_id) : "<none>", IMAGE ? 1 : 0, IMAGE ? Hyprview::formatBox(IMAGE->overviewBox) : "<none>",
+            IMAGE ? overviewBoxIntersectsMonitor(IMAGE->overviewBox) : false, WINDOW ? overviewWindowOccludedByFullscreen(WINDOW) : false,
+            OWNER.layer ? reinterpret_cast<uintptr_t>(OWNER.layer.get()) : 0, OWNER.layer ? OWNER.layer->m_namespace : "<none>", OWNER.layer ? sc<int>(OWNER.layer->m_layer) : -1,
+            OWNER.layer ? OWNER.layer->m_mapped : false, OWNER.layer ? Desktop::View::validMapped(OWNER.layer) : false));
+    };
+
+    if (!surfaceOwnerBelongsToOverviewMonitor(OWNER, MONITOR)) {
+        logDecision(true, "owner-outside-overview-monitor");
         return true;
+    }
 
     if (OWNER.type == eOverviewSurfaceOwner::LAYER || OWNER.type == eOverviewSurfaceOwner::LAYER_POPUP) {
-        if (!OWNER.layer)
+        if (!OWNER.layer) {
+            logDecision(false, "missing-layer-owner");
             return false;
+        }
 
         if (OWNER.layer->m_layer > ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM) {
             damage();
             g_pCompositor->scheduleFrameForMonitor(MONITOR);
+            logDecision(false, "external-layer-reroute-to-overview");
             return false;
         }
 
+        logDecision(true, "background-bottom-layer-native");
         return true;
     }
 
     auto WINDOW = overviewWindowToRender(OWNER.window);
-    if (!WINDOW || WINDOW->m_monitor != MONITOR)
+    if (!WINDOW || WINDOW->m_monitor != MONITOR) {
+        logDecision(false, "missing-window-or-monitor-mismatch");
         return false;
+    }
 
     if (WINDOW->m_pinned && WINDOW->m_isFloating) {
         damage();
         g_pCompositor->scheduleFrameForMonitor(MONITOR);
+        logDecision(false, "pinned-floating-reroute-to-overview");
         return false;
     }
 
     const auto IMAGE = imageForRenderedWindow(WINDOW);
-    if (!IMAGE || overviewWindowOccludedByFullscreen(WINDOW) || !overviewBoxIntersectsMonitor(IMAGE->overviewBox))
+    if (!IMAGE || overviewWindowOccludedByFullscreen(WINDOW) || !overviewBoxIntersectsMonitor(IMAGE->overviewBox)) {
+        logDecision(false, "window-not-visible-in-overview");
         return false;
+    }
 
     damage();
     g_pCompositor->scheduleFrameForMonitor(MONITOR);
+    logDecision(false, "overview-window-reroute-to-overview");
     return false;
 }
 
@@ -191,25 +234,61 @@ bool CScrollOverview::shouldAllowSurfaceFrame(SP<CWLSurfaceResource> surface, co
     if (OWNER.type == eOverviewSurfaceOwner::UNKNOWN)
         return true;
 
-    if (!surfaceOwnerBelongsToOverviewMonitor(OWNER, MONITOR))
-        return true;
+    auto ownerName = [](eOverviewSurfaceOwner type) -> std::string_view {
+        switch (type) {
+            case eOverviewSurfaceOwner::WINDOW: return "window";
+            case eOverviewSurfaceOwner::LAYER: return "layer";
+            case eOverviewSurfaceOwner::WINDOW_POPUP: return "window-popup";
+            case eOverviewSurfaceOwner::LAYER_POPUP: return "layer-popup";
+            case eOverviewSurfaceOwner::UNKNOWN: break;
+        }
 
-    if (OWNER.type == eOverviewSurfaceOwner::LAYER || OWNER.type == eOverviewSurfaceOwner::LAYER_POPUP)
+        return "unknown";
+    };
+
+    auto logDecision = [&](bool allow, std::string_view reason) {
+        const auto WINDOW = overviewWindowToRender(OWNER.window);
+        const auto IMAGE  = imageForRenderedWindow(WINDOW);
+        Hyprview::telemetryLog(std::format(
+            "event=surface-frame-decision allow={} reason={} owner={} surface={:x} overviewMonitor={} ownerMonitor={} window={:x} windowWorkspace={} image={} imageBox={} "
+            "imageIntersects={} overviewWindowVisible={} sendingOverviewFrameCallbacks={} layer={:x} layerNs={} layerLevel={} layerMapped={} layerValidMapped={}",
+            allow ? 1 : 0, reason, ownerName(OWNER.type), reinterpret_cast<uintptr_t>(surface.get()), MONITOR ? MONITOR->m_name : "<none>",
+            OWNER.monitor ? OWNER.monitor->m_name : "<none>", WINDOW ? reinterpret_cast<uintptr_t>(WINDOW.get()) : 0,
+            WINDOW && WINDOW->m_workspace ? std::to_string(WINDOW->m_workspace->m_id) : "<none>", IMAGE ? 1 : 0, IMAGE ? Hyprview::formatBox(IMAGE->overviewBox) : "<none>",
+            IMAGE ? overviewBoxIntersectsMonitor(IMAGE->overviewBox) : false, WINDOW ? overviewWindowVisible(WINDOW) : false, sendingOverviewFrameCallbacks ? 1 : 0,
+            OWNER.layer ? reinterpret_cast<uintptr_t>(OWNER.layer.get()) : 0, OWNER.layer ? OWNER.layer->m_namespace : "<none>", OWNER.layer ? sc<int>(OWNER.layer->m_layer) : -1,
+            OWNER.layer ? OWNER.layer->m_mapped : false, OWNER.layer ? Desktop::View::validMapped(OWNER.layer) : false));
+    };
+
+    if (!surfaceOwnerBelongsToOverviewMonitor(OWNER, MONITOR)) {
+        logDecision(true, "owner-outside-overview-monitor");
         return true;
+    }
+
+    if (OWNER.type == eOverviewSurfaceOwner::LAYER || OWNER.type == eOverviewSurfaceOwner::LAYER_POPUP) {
+        logDecision(true, "external-layer-frame-native");
+        return true;
+    }
 
     const auto WINDOW = overviewWindowToRender(OWNER.window);
-    if (!WINDOW)
+    if (!WINDOW) {
+        logDecision(true, "missing-window");
         return true;
+    }
 
     if (!overviewWindowVisible(WINDOW)) {
         scheduleRealtimePreviewFrame();
+        logDecision(false, "window-not-visible-schedule-preview");
         return false;
     }
 
-    if (sendingOverviewFrameCallbacks)
+    if (sendingOverviewFrameCallbacks) {
+        logDecision(true, "overview-frame-callback-pass-through");
         return true;
+    }
 
     scheduleRealtimePreviewFrame();
+    logDecision(false, "visible-window-throttle-native-frame");
     return false;
 }
 

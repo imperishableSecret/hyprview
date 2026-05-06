@@ -1,4 +1,5 @@
 #include "ScrollOverview.hpp"
+#include "../../plugin/Telemetry.hpp"
 #include <algorithm>
 #include <any>
 #include <cmath>
@@ -33,7 +34,17 @@
 static constexpr double DRAG_THRESHOLD                    = 8.0;
 static constexpr double SMOOTH_SCROLL_WORKSPACE_THRESHOLD = 120.0;
 
-bool                    CScrollOverview::pointerOverBlockingLayerSurface(const Vector2D& local) const {
+namespace {
+    std::string workspaceID(PHLWORKSPACE workspace) {
+        return workspace ? std::to_string(workspace->m_id) : "<none>";
+    }
+
+    std::string windowID(PHLWINDOW window) {
+        return window ? Hyprview::formatRawPtr(window.get()) : "0";
+    }
+}
+
+bool CScrollOverview::pointerOverBlockingLayerSurface(const Vector2D& local) const {
     if (!pMonitor || inputState.mode != ePointerMode::IDLE)
         return false;
 
@@ -235,10 +246,16 @@ void CScrollOverview::updateWindowDrag(const Vector2D& local) {
 }
 
 void CScrollOverview::updateViewportPan(const Vector2D& local) {
-    if (!inputState.pannedWorkspace || !workspaceUsesScrollingLayout(inputState.pannedWorkspace->pWorkspace))
+    if (!inputState.pannedWorkspace || !workspaceUsesScrollingLayout(inputState.pannedWorkspace->pWorkspace)) {
+        Hyprview::telemetryLog(std::format("event=pointer-pan-skip reason=invalid-or-not-scrolling workspace={} local={}",
+                                           workspaceID(inputState.pannedWorkspace ? inputState.pannedWorkspace->pWorkspace : PHLWORKSPACE{}), Hyprview::formatVector(local)));
         return;
+    }
 
     const auto DELTA_X = (local.x - inputState.pressPosLocal.x) / scale->value();
+    Hyprview::telemetryLog(std::format("event=pointer-pan workspace={} press={} local={} scale={:.5f} contentPanOnPress={:.2f} deltaX={:.2f} requestedPan={:.2f}",
+                                       workspaceID(inputState.pannedWorkspace->pWorkspace), Hyprview::formatVector(inputState.pressPosLocal), Hyprview::formatVector(local),
+                                       scale->value(), inputState.contentPanOnPress, DELTA_X, inputState.contentPanOnPress - DELTA_X));
     setHorizontalPanForWorkspace(inputState.pannedWorkspace, inputState.contentPanOnPress - DELTA_X);
     highlightHoverDebug(false);
 }
@@ -248,8 +265,11 @@ bool CScrollOverview::snapMousePanForWorkspace(const SP<SWorkspaceImage>& worksp
         return false;
 
     const auto RANGE = horizontalPanRangeForWorkspace(workspace);
-    if (RANGE.max - RANGE.min <= 0.5)
+    if (RANGE.max - RANGE.min <= 0.5) {
+        Hyprview::telemetryLog(std::format("event=mouse-snap-pan-skip reason=no-pan-range workspace={} direction={} range={:.2f},{:.2f}", workspaceID(workspace->pWorkspace),
+                                           direction, RANGE.min, RANGE.max));
         return false;
+    }
 
     const double     SCALE        = std::max(0.1F, scale->value());
     const double     TARGET_X     = workspace->overviewBox.middle().x;
@@ -281,10 +301,18 @@ bool CScrollOverview::snapMousePanForWorkspace(const SP<SWorkspaceImage>& worksp
         }
     }
 
-    if (!target)
+    if (!target) {
+        Hyprview::telemetryLog(std::format("event=mouse-snap-pan-skip reason=no-target workspace={} direction={} currentPan={:.2f} targetX={:.2f} range={:.2f},{:.2f}",
+                                           workspaceID(workspace->pWorkspace), direction, CURRENT_PAN, TARGET_X, RANGE.min, RANGE.max));
         return false;
+    }
 
     const double DELTA = target->overviewBox.middle().x - TARGET_X;
+    Hyprview::telemetryLog(
+        std::format("event=mouse-snap-pan workspace={} direction={} targetWindow={} targetBox={} targetX={:.2f} currentPan={:.2f} delta={:.2f} requestedPan={:.2f} "
+                    "scale={:.5f}",
+                    workspaceID(workspace->pWorkspace), direction, windowID(target->pWindow.lock()), Hyprview::formatBox(target->overviewBox), TARGET_X, CURRENT_PAN, DELTA,
+                    CURRENT_PAN + DELTA / SCALE, SCALE));
     return setHorizontalPanForWorkspace(workspace, CURRENT_PAN + DELTA / SCALE, true);
 }
 

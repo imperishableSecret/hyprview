@@ -148,7 +148,11 @@ namespace {
             return result;
         if (auto result = readLuaIntField(L, tableIdx, "window_gap", config.windowGap); !result)
             return result;
+        if (auto result = readLuaIntField(L, tableIdx, "workspace_gap", config.workspaceGap); !result)
+            return result;
         if (auto result = readLuaBoolField(L, tableIdx, "background_blur", config.backgroundBlur); !result)
+            return result;
+        if (auto result = readLuaBoolField(L, tableIdx, "show_workspace_layers", config.showWorkspaceLayers); !result)
             return result;
         if (auto result = readLuaColorField(L, tableIdx, "backdrop_col", config.backdropColor); !result)
             return result;
@@ -240,6 +244,15 @@ namespace {
         return {};
     }
 
+    std::expected<void, std::string> applyLuaDebugConfig(lua_State* L, int tableIdx, SHyprviewDebugConfig& config) {
+        if (auto result = readLuaBoolField(L, tableIdx, "telemetry", config.telemetry); !result)
+            return result;
+        if (auto result = readLuaStringField(L, tableIdx, "telemetry_path", config.telemetryPath); !result)
+            return result;
+
+        return {};
+    }
+
     std::expected<void, std::string> applyLuaHyprviewConfig(lua_State* L, int tableIdx, SHyprviewConfig& config) {
         const int TABLE = lua_absindex(L, tableIdx);
 
@@ -275,6 +288,20 @@ namespace {
             lua_pop(L, 1);
 
         lua_getfield(L, TABLE, "mouse");
+        if (!lua_isnil(L, -1) && !lua_istable(L, -1)) {
+            lua_pop(L, 1);
+            return std::unexpected("mouse must be a table");
+        }
+
+        if (!lua_isnil(L, -1)) {
+            auto result = applyLuaMouseConfig(L, lua_gettop(L), config.mouse);
+            lua_pop(L, 1);
+            if (!result)
+                return result;
+        } else
+            lua_pop(L, 1);
+
+        lua_getfield(L, TABLE, "debug");
         if (lua_isnil(L, -1)) {
             lua_pop(L, 1);
             return {};
@@ -282,10 +309,10 @@ namespace {
 
         if (!lua_istable(L, -1)) {
             lua_pop(L, 1);
-            return std::unexpected("mouse must be a table");
+            return std::unexpected("debug must be a table");
         }
 
-        auto result = applyLuaMouseConfig(L, lua_gettop(L), config.mouse);
+        auto result = applyLuaDebugConfig(L, lua_gettop(L), config.debug);
         lua_pop(L, 1);
         return result;
     }

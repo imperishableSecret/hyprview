@@ -146,6 +146,7 @@ class CScrollOverview : public IOverview {
     void                     syncViewportWorkspaceFromOffset(const Vector2D& offset);
     void                     activateWorkspace(PHLWORKSPACE workspace, bool focus = true);
     void                     activateViewportWorkspace();
+    double                   workspaceOverviewStep() const;
     double                   viewOffsetForWorkspaceIndex(size_t index) const;
     Vector2D                 clampedViewOffset(Vector2D offset) const;
     void                     rebuildGeometryCache();
@@ -218,6 +219,12 @@ class CScrollOverview : public IOverview {
     bool                     renderWindowLive(PHLWINDOW window, const CBox& box, const Time::steady_tp& now, double alpha = 1.0);
     void                     renderDraggedWindowLive(const Time::steady_tp& now);
     void                     renderPinnedFloatingWindowsLive(const Time::steady_tp& now);
+    void                     forceLayerSurfaceTreeVisibility(PHLLS layer, bool popups);
+    void                     renderLiveBackdrop(const Time::steady_tp& now);
+    void                     renderBackdropLayer(PHLLS layer, const Time::steady_tp& now);
+    void                     renderBackdropLayerLevel(uint32_t layer, const Time::steady_tp& now);
+    void                     renderWorkspaceLayer(PHLLS layer, const SP<SWorkspaceImage>& workspace, const Time::steady_tp& now);
+    void                     renderWorkspaceLayerLevel(const SP<SWorkspaceImage>& workspace, uint32_t layer, const Time::steady_tp& now);
     void                     renderHyprlandLayerPhase(const Time::steady_tp& now);
     void                     renderWindowImage(SP<SWindowImage> img, const CBox& box, double alpha = 1.0);
     void                     renderFocusIndicator(SP<SWindowImage> img);

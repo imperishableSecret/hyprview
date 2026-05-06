@@ -1,6 +1,9 @@
 #include "ScrollOverview.hpp"
+#include "../../plugin/Telemetry.hpp"
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <format>
 
 #define private   public
 #define protected public
@@ -98,9 +101,18 @@ void CScrollOverview::redrawWindowImage(SP<SWindowImage> img) {
     if (!img)
         return;
 
-    const auto WINDOW = img->pWindow.lock();
-    if (!windowImageRenderable(WINDOW))
+    const auto WINDOW     = img->pWindow.lock();
+    const bool RENDERABLE = windowImageRenderable(WINDOW);
+    Hyprview::telemetryLog(std::format("event=snapshot-redraw-enter window={:x} renderable={} workspace={} hidden={} suspended={} pos={} size={} fb={}",
+                                       WINDOW ? reinterpret_cast<uintptr_t>(WINDOW.get()) : 0, RENDERABLE ? 1 : 0,
+                                       WINDOW && WINDOW->m_workspace ? std::to_string(WINDOW->m_workspace->m_id) : "<none>", WINDOW ? WINDOW->isHidden() : false,
+                                       WINDOW ? WINDOW->m_suspended : false, WINDOW ? Hyprview::formatVector(WINDOW->m_realPosition->value()) : "<none>",
+                                       WINDOW ? Hyprview::formatVector(WINDOW->m_realSize->value()) : "<none>", img->fb ? 1 : 0));
+
+    if (!RENDERABLE) {
+        Hyprview::telemetryLog(std::format("event=snapshot-redraw-skip reason=not-renderable window={:x}", WINDOW ? reinterpret_cast<uintptr_t>(WINDOW.get()) : 0));
         return;
+    }
 
     CRegion fakeDamage{0, 0, sc<int>(pMonitor->m_transformedSize.x), sc<int>(pMonitor->m_transformedSize.y)};
     g_pHyprRenderer->beginFullFakeRender(pMonitor.lock(), fakeDamage, img->fb);
@@ -115,6 +127,9 @@ void CScrollOverview::redrawWindowImage(SP<SWindowImage> img) {
     img->lastWindowPosition = WINDOW->m_realPosition->value();
     img->lastWindowSize     = WINDOW->m_realSize->value();
     img->dirty              = false;
+    Hyprview::telemetryLog(std::format("event=snapshot-redraw-end window={:x} lastPos={} lastSize={} fbSize={}", reinterpret_cast<uintptr_t>(WINDOW.get()),
+                                       Hyprview::formatVector(img->lastWindowPosition), Hyprview::formatVector(img->lastWindowSize),
+                                       img->fb ? Hyprview::formatVector(img->fb->m_size) : "<none>"));
 }
 
 bool CScrollOverview::windowImageRenderable(PHLWINDOW window) const {

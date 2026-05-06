@@ -1,4 +1,5 @@
 #include "ScrollOverview.hpp"
+#include "../../plugin/Telemetry.hpp"
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -11,6 +12,16 @@
 #include <hyprland/src/helpers/Monitor.hpp>
 #undef protected
 #undef private
+
+namespace {
+    std::string windowID(PHLWINDOW window) {
+        return window ? Hyprview::formatRawPtr(window.get()) : "0";
+    }
+
+    std::string workspaceID(PHLWORKSPACE workspace) {
+        return workspace ? std::to_string(workspace->m_id) : "<none>";
+    }
+}
 
 void CScrollOverview::clearWindowHighlights() {
     for (const auto& wimg : images) {
@@ -120,25 +131,43 @@ SP<CScrollOverview::SWindowImage> CScrollOverview::imageForKeyboardSelection() c
 }
 
 void CScrollOverview::centerWindowImageInScrollingWorkspace(SP<SWindowImage> image, bool animate) {
-    if (!pMonitor || !image || !image->pWindow)
+    if (!pMonitor || !image || !image->pWindow) {
+        Hyprview::telemetryLog(std::format("event=selection-center-skip reason=invalid-input animate={}", Hyprview::boolToken(animate)));
         return;
+    }
 
     const auto WINDOW = image->pWindow.lock();
-    if (!WINDOW || WINDOW->m_isFloating || !WINDOW->m_realPosition || !WINDOW->m_realSize)
+    if (!WINDOW || WINDOW->m_isFloating || !WINDOW->m_realPosition || !WINDOW->m_realSize) {
+        Hyprview::telemetryLog(std::format("event=selection-center-skip reason=invalid-window window={} floating={} animate={}", windowID(WINDOW),
+                                           Hyprview::boolToken(WINDOW && WINDOW->m_isFloating), Hyprview::boolToken(animate)));
         return;
+    }
 
     const auto WORKSPACE = workspaceImageForWindowImage(image);
-    if (!WORKSPACE || !workspaceUsesScrollingLayout(WORKSPACE->pWorkspace))
+    if (!WORKSPACE || !workspaceUsesScrollingLayout(WORKSPACE->pWorkspace)) {
+        Hyprview::telemetryLog(std::format("event=selection-center-skip reason=not-scrolling window={} workspace={} animate={}", windowID(WINDOW),
+                                           workspaceID(WORKSPACE ? WORKSPACE->pWorkspace : PHLWORKSPACE{}), Hyprview::boolToken(animate)));
         return;
+    }
 
     const auto   TARGET_POS    = WINDOW->m_realPosition->goal();
     const auto   TARGET_SIZE   = WINDOW->m_realSize->goal();
     const double TARGET_CENTER = TARGET_POS.x - pMonitor->m_position.x + TARGET_SIZE.x / 2.0;
     const double TARGET_PAN    = TARGET_CENTER - pMonitor->m_size.x / 2.0;
-    const double delta         = TARGET_PAN - horizontalPanForWorkspace(WORKSPACE);
+    const auto   RANGE         = horizontalPanRangeForWorkspace(WORKSPACE);
+    const double CURRENT_PAN   = horizontalPanForWorkspace(WORKSPACE);
+    const double delta         = TARGET_PAN - CURRENT_PAN;
 
-    if (std::abs(delta) < 0.5)
+    Hyprview::telemetryLog(std::format("event=selection-center-window window={} workspace={} targetPos={} targetSize={} targetCenter={:.2f} requestedPan={:.2f} currentPan={:.2f} "
+                                       "delta={:.2f} range={:.2f},{:.2f} animate={}",
+                                       windowID(WINDOW), workspaceID(WORKSPACE->pWorkspace), Hyprview::formatVector(TARGET_POS), Hyprview::formatVector(TARGET_SIZE), TARGET_CENTER,
+                                       TARGET_PAN, CURRENT_PAN, delta, RANGE.min, RANGE.max, Hyprview::boolToken(animate)));
+
+    if (std::abs(delta) < 0.5) {
+        Hyprview::telemetryLog(std::format("event=selection-center-skip reason=already-centered window={} workspace={} currentPan={:.2f} requestedPan={:.2f}", windowID(WINDOW),
+                                           workspaceID(WORKSPACE->pWorkspace), CURRENT_PAN, TARGET_PAN));
         return;
+    }
 
     setHorizontalPanForWorkspace(WORKSPACE, TARGET_PAN, animate);
 }
@@ -150,6 +179,12 @@ void CScrollOverview::ensureSelectionVisible(SP<SWindowImage> image) {
 void CScrollOverview::setKeyboardSelection(SP<SWindowImage> image, bool lockedToKeyboard, bool damageOnChange) {
     const auto OLD_SELECTION = keyboardSelectedWindow;
     const auto WINDOW        = image && image->pWindow ? image->pWindow.lock() : PHLWINDOW{};
+    const auto ACTIVE        = Desktop::focusState()->window();
+
+    Hyprview::telemetryLog(
+        std::format("event=selection-set old={} new={} newWorkspace={} locked={} damage={} focusFollowsSelection={} active={} activeWorkspace={}", windowID(OLD_SELECTION.lock()),
+                    windowID(WINDOW), workspaceID(WINDOW ? WINDOW->m_workspace : PHLWORKSPACE{}), Hyprview::boolToken(lockedToKeyboard), Hyprview::boolToken(damageOnChange),
+                    Hyprview::boolToken(g_hyprviewConfig.keyboard.focusFollowsSelection), windowID(ACTIVE), workspaceID(ACTIVE ? ACTIVE->m_workspace : PHLWORKSPACE{})));
 
     if (WINDOW) {
         keyboardSelectedWindow  = WINDOW;
@@ -173,6 +208,10 @@ void CScrollOverview::setKeyboardSelection(SP<SWindowImage> image, bool lockedTo
 }
 
 void CScrollOverview::syncSelectionToViewport(bool damageOnChange) {
+    Hyprview::telemetryLog(std::format("event=selection-sync-start enabled={} images={} viewportIndex={} old={} locked={} damage={}",
+                                       Hyprview::boolToken(g_hyprviewConfig.keyboard.enabled), images.size(), viewportCurrentWorkspace, windowID(keyboardSelectedWindow.lock()),
+                                       Hyprview::boolToken(keyboardSelectionLocked), Hyprview::boolToken(damageOnChange)));
+
     if (!g_hyprviewConfig.keyboard.enabled) {
         setKeyboardSelection(nullptr, false, damageOnChange);
         rememberedSelection.clear();
@@ -194,6 +233,10 @@ void CScrollOverview::syncSelectionToViewport(bool damageOnChange) {
     const auto NEW_SELECTION = keyboardSelectedWindow.lock();
     if (OLD_SELECTION != NEW_SELECTION && NEW_SELECTION && NEW_SELECTION->m_workspace)
         restoredSelectionWorkspace = NEW_SELECTION->m_workspace;
+
+    Hyprview::telemetryLog(std::format("event=selection-sync-end viewportIndex={} viewportWorkspace={} old={} new={} restoredWorkspace={}", viewportCurrentWorkspace,
+                                       workspaceID(images[viewportCurrentWorkspace] ? images[viewportCurrentWorkspace]->pWorkspace : PHLWORKSPACE{}), windowID(OLD_SELECTION),
+                                       windowID(NEW_SELECTION), workspaceID(restoredSelectionWorkspace.lock())));
 }
 
 bool CScrollOverview::moveHorizontalSelection(bool right) {

@@ -35,7 +35,8 @@ void CScrollOverview::rebuildGeometryCache() {
 
     const auto VIEWPORT_CENTER = CBox{{}, pMonitor->m_size}.middle();
     const auto WINDOW_GAP      = (std::max(0.0, static_cast<double>(g_hyprviewConfig.scrolling.windowGap)) / 2.0) * overviewStyleProgress();
-    float      yoff            = -sc<float>(activeWorkspaceImageIndex()) * pMonitor->m_size.y * scale->value();
+    const auto WORKSPACE_STEP  = workspaceOverviewStep() * scale->value();
+    float      yoff            = -sc<float>(activeWorkspaceImageIndex()) * WORKSPACE_STEP;
 
     for (const auto& wimg : images) {
         if (!wimg)
@@ -65,7 +66,7 @@ void CScrollOverview::rebuildGeometryCache() {
             wimg->hitBox = boxUnion(wimg->hitBox, img->overviewBox);
         }
 
-        yoff += pMonitor->m_size.y * scale->value();
+        yoff += WORKSPACE_STEP;
     }
 
     buildInsertionMarkers();
