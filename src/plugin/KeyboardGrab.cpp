@@ -5,17 +5,19 @@
 
 #include <algorithm>
 #include <charconv>
-#include <format>
 #include <string>
-#include <string_view>
 #include <unordered_set>
 #include <vector>
 
 #include <hyprland/src/Compositor.hpp>
+#include <hyprland/src/desktop/view/LayerSurface.hpp>
+#include <hyprland/src/desktop/view/Popup.hpp>
+#include <hyprland/src/desktop/view/WLSurface.hpp>
 #include <hyprland/src/event/EventBus.hpp>
 #include <hyprland/src/managers/KeybindManager.hpp>
 #include <hyprland/src/managers/SeatManager.hpp>
 #include <hyprland/src/managers/input/InputManager.hpp>
+#include <wlr-layer-shell-unstable-v1.hpp>
 
 extern "C" {
 #include <lauxlib.h>
@@ -158,6 +160,25 @@ namespace Hyprview {
 
         if (event.state != WL_KEYBOARD_KEY_STATE_PRESSED)
             return;
+
+        const auto FOCUSED_SURFACE = g_pSeatManager->m_state.keyboardFocus.lock();
+        if (FOCUSED_SURFACE) {
+            const auto HL_SURFACE = Desktop::View::CWLSurface::fromResource(FOCUSED_SURFACE);
+            const auto VIEW       = HL_SURFACE ? HL_SURFACE->view() : nullptr;
+            auto       layer      = VIEW ? Desktop::View::CLayerSurface::fromView(VIEW) : PHLLS{};
+
+            if (!layer) {
+                const auto POPUP = VIEW ? Desktop::View::CPopup::fromView(VIEW) : WP<Desktop::View::CPopup>{};
+                if (POPUP) {
+                    const auto OWNER = POPUP->getT1Owner();
+                    if (OWNER && OWNER->view())
+                        layer = Desktop::View::CLayerSurface::fromView(OWNER->view());
+                }
+            }
+
+            if (layer && layer->m_layer >= ZWLR_LAYER_SHELL_V1_LAYER_TOP)
+                return;
+        }
 
         const auto KEYBOARD = g_pSeatManager->m_keyboard.lock();
         if (!KEYBOARD || !KEYBOARD->m_xkbState)

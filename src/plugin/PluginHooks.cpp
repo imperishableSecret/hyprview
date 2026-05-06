@@ -16,8 +16,10 @@
 #include <hyprland/src/debug/log/Logger.hpp>
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/helpers/Monitor.hpp>
+#include <hyprland/src/desktop/view/LayerSurface.hpp>
 #include <hyprland/src/protocols/core/Compositor.hpp>
 #include <hyprland/src/render/Renderer.hpp>
+#include <wlr-layer-shell-unstable-v1.hpp>
 
 namespace {
     CFunctionHook* g_pRenderWorkspaceHook = nullptr;
@@ -64,6 +66,24 @@ namespace {
         }
 
         return result.empty() ? "<none>" : result;
+    }
+
+    bool monitorHasRealtimeLayer(PHLMONITOR monitor) {
+        if (!monitor)
+            return false;
+
+        for (const auto LAYER_LEVEL : {ZWLR_LAYER_SHELL_V1_LAYER_TOP, ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY}) {
+            for (const auto& layerRef : monitor->m_layerSurfaceLayers[LAYER_LEVEL]) {
+                const auto LAYER = layerRef.lock();
+                if (!LAYER)
+                    continue;
+
+                if (Desktop::View::validMapped(LAYER))
+                    return true;
+            }
+        }
+
+        return false;
     }
 
     void logHookCandidates(std::string_view hookName, const std::vector<SFunctionMatch>& matches) {
@@ -138,7 +158,9 @@ namespace {
             const bool THROTTLED_REASON = reason == AQ_SCHEDULE_UNKNOWN || reason == AQ_SCHEDULE_CLIENT_UNKNOWN || reason == AQ_SCHEDULE_NEEDS_FRAME ||
                 reason == AQ_SCHEDULE_RENDER_MONITOR || reason == AQ_SCHEDULE_DAMAGE;
 
-            if (THROTTLED_REASON && !g_pOverview->blockDamageReporting && !g_pOverview->shouldAllowRealtimePreviewSchedule())
+            const bool HAS_REALTIME_LAYER = monitorHasRealtimeLayer(monitor);
+
+            if (THROTTLED_REASON && !damageFromSurface && !HAS_REALTIME_LAYER && !g_pOverview->blockDamageReporting && !g_pOverview->shouldAllowRealtimePreviewSchedule())
                 return;
         }
 
@@ -146,7 +168,9 @@ namespace {
     }
 
     void hkDamageSurface(void* thisptr, SP<CWLSurfaceResource> surface, double x, double y, double scale) {
-        if (!g_pOverview || g_pOverview->blockDamageReporting || g_pOverview->shouldHandleSurfaceDamage(surface)) {
+        const bool ALLOW = !g_pOverview || g_pOverview->blockDamageReporting || g_pOverview->shouldHandleSurfaceDamage(surface);
+
+        if (ALLOW) {
             const bool PREVIOUS = damageFromSurface;
             damageFromSurface   = !!g_pOverview;
             ((origDamageSurface)g_pDamageSurfaceHook->m_original)(thisptr, surface, x, y, scale);
@@ -163,8 +187,9 @@ namespace {
 
     void hkSurfaceFrame(void* thisptr, const Time::steady_tp& now) {
         const auto SURFACE = static_cast<CWLSurfaceResource*>(thisptr)->m_self.lock();
+        const bool ALLOW   = !g_pOverview || g_pOverview->shouldAllowSurfaceFrame(SURFACE, now);
 
-        if (g_pOverview && !g_pOverview->shouldAllowSurfaceFrame(SURFACE, now))
+        if (!ALLOW)
             return;
 
         ((origSurfaceFrame)g_pSurfaceFrameHook->m_original)(thisptr, now);

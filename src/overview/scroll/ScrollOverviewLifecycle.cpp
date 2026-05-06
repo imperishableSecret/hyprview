@@ -66,6 +66,8 @@ CScrollOverview::~CScrollOverview() {
         realtimePreviewTimer = nullptr;
     }
     images.clear(); // otherwise we get a vram leak
+    restoreForcedSurfaceVisibility();
+    restoreForcedWindowVisibility();
     Cursor::overrideController->unsetOverride(Cursor::CURSOR_OVERRIDE_SPECIAL_ACTION);
 }
 
@@ -227,8 +229,11 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
     mouseAxisHook = Event::bus()->m_events.input.mouse.axis.listen([onMouseAxis](IPointer::SAxisEvent e, Event::SCallbackInfo& info) { onMouseAxis(e, info); });
 
     mouseButtonHook = Event::bus()->m_events.input.mouse.button.listen([onCursorButton](IPointer::SButtonEvent e, Event::SCallbackInfo& info) { onCursorButton(e, info); });
-    touchDownHook   = Event::bus()->m_events.input.touch.down.listen([this](ITouch::SDownEvent, Event::SCallbackInfo& info) {
+    touchDownHook   = Event::bus()->m_events.input.touch.down.listen([this](ITouch::SDownEvent e, Event::SCallbackInfo& info) {
         if (closing)
+            return;
+
+        if (pMonitor && pointerOverBlockingLayerSurface(e.pos * pMonitor->m_size))
             return;
 
         info.cancelled = true;
@@ -314,11 +319,12 @@ void CScrollOverview::onPreRender() {
     if (pMonitor)
         pMonitor->m_solitaryClient.reset();
 
-    if (!closing) {
+    if (!closing && snapshotFallbackActive()) {
         damageDirty = false;
         if (redrawDirtyWindowImages())
             damage();
-    }
+    } else if (!closing)
+        damageDirty = false;
 
     if (!closing && cursorSyncUntilMs != 0 && inputState.mode == ePointerMode::IDLE) {
         const auto NOW = Time::millis(Time::steadyNow());
@@ -355,43 +361,7 @@ void CScrollOverview::render() {
     if (!closing && inputState.mode == ePointerMode::IDLE)
         highlightHoverDebug(false);
 
-    g_pHyprRenderer->m_renderPass.add(makeUnique<COverviewPassElement>());
-
-    const auto MONITOR = pMonitor.lock();
-    if (!MONITOR)
-        return;
-
-    const bool PREVIOUS_BLOCK_SURFACE_FEEDBACK = g_pHyprRenderer->m_bBlockSurfaceFeedback;
-    g_pHyprRenderer->m_bBlockSurfaceFeedback   = true;
-    auto restoreSurfaceFeedback = Hyprutils::Utils::CScopeGuard([PREVIOUS_BLOCK_SURFACE_FEEDBACK] { g_pHyprRenderer->m_bBlockSurfaceFeedback = PREVIOUS_BLOCK_SURFACE_FEEDBACK; });
-
-    const auto NOW = Time::steadyNow();
-
-    for (const auto& ls : MONITOR->m_layerSurfaceLayers[ZWLR_LAYER_SHELL_V1_LAYER_TOP]) {
-        const auto LAYER = ls.lock();
-        if (Desktop::View::validMapped(LAYER))
-            g_pHyprRenderer->renderLayer(LAYER, MONITOR, NOW);
-    }
-
-    for (const auto& ls : MONITOR->m_layerSurfaceLayers[ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY]) {
-        const auto LAYER = ls.lock();
-        if (Desktop::View::validMapped(LAYER))
-            g_pHyprRenderer->renderLayer(LAYER, MONITOR, NOW);
-    }
-
-    for (const auto& ls : MONITOR->m_layerSurfaceLayers[ZWLR_LAYER_SHELL_V1_LAYER_TOP]) {
-        const auto LAYER = ls.lock();
-        if (Desktop::View::validMapped(LAYER))
-            g_pHyprRenderer->renderLayer(LAYER, MONITOR, NOW, true);
-    }
-
-    for (const auto& ls : MONITOR->m_layerSurfaceLayers[ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY]) {
-        const auto LAYER = ls.lock();
-        if (Desktop::View::validMapped(LAYER))
-            g_pHyprRenderer->renderLayer(LAYER, MONITOR, NOW, true);
-    }
-
-    sendOverviewFrameCallbacks(NOW);
+    renderOverviewLive(Time::steadyNow());
 }
 
 void CScrollOverview::setClosing(bool closing_) {

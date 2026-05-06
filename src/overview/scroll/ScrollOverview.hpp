@@ -89,6 +89,16 @@ class CScrollOverview : public IOverview {
         PHLMONITOR            monitor;
     };
 
+    struct SForcedSurfaceVisibility {
+        SP<CWLSurfaceResource> surface;
+        CRegion                visibleRegion;
+    };
+
+    struct SForcedWindowVisibility {
+        PHLWINDOWREF window;
+        bool         hidden = false;
+    };
+
     struct SDropTarget {
         eDropTargetType     type = eDropTargetType::NONE;
         SP<SWorkspaceImage> workspace;
@@ -184,6 +194,10 @@ class CScrollOverview : public IOverview {
     SOverviewSurfaceOwner    overviewSurfaceOwner(SP<CWLSurfaceResource> surface) const;
     bool                     surfaceOwnerBelongsToOverviewMonitor(const SOverviewSurfaceOwner& owner, PHLMONITOR monitor) const;
     bool                     overviewWindowVisible(PHLWINDOW window) const;
+    bool                     overviewBoxIntersectsMonitor(const CBox& box) const;
+    bool                     overviewWindowOccludedByFullscreen(PHLWINDOW window) const;
+    PHLWINDOW                overviewWindowToRender(PHLWINDOW window) const;
+    SP<SWindowImage>         imageForRenderedWindow(PHLWINDOW window) const;
     bool                     surfaceTreeHasFrameCallbacks(SP<CWLSurfaceResource> surface) const;
     void                     surfaceTreePresent(SP<CWLSurfaceResource> surface, PHLMONITOR monitor, const Time::steady_tp& now);
     void                     sendOverviewFrameCallbacks(const Time::steady_tp& now);
@@ -192,6 +206,18 @@ class CScrollOverview : public IOverview {
     void                     scheduleMinimumPreviewFrame();
     void                     scheduleRealtimePreviewFrame();
     static int               realtimePreviewTimerCallback(void* data);
+    bool                     snapshotFallbackActive() const;
+    void                     forceSurfaceVisibility(SP<CWLSurfaceResource> surface);
+    void                     forceWindowSurfaceVisibility(PHLWINDOW window);
+    void                     forceWindowVisible(PHLWINDOW window);
+    void                     restoreForcedSurfaceVisibility();
+    void                     restoreForcedWindowVisibility();
+    void                     renderOverviewLive(const Time::steady_tp& now);
+    void                     renderWorkspaceLive(const SP<SWorkspaceImage>& workspace, const Time::steady_tp& now);
+    bool                     renderWindowLive(PHLWINDOW window, const CBox& box, const Time::steady_tp& now, double alpha = 1.0);
+    void                     renderDraggedWindowLive(const Time::steady_tp& now);
+    void                     renderPinnedFloatingWindowsLive(const Time::steady_tp& now);
+    void                     renderHyprlandLayerPhase(const Time::steady_tp& now);
     void                     renderWindowImage(SP<SWindowImage> img, const CBox& box, double alpha = 1.0);
     void                     renderFocusIndicator(SP<SWindowImage> img);
     void                     renderActiveWindowIndicator(SP<SWindowImage> img);
@@ -258,6 +284,8 @@ class CScrollOverview : public IOverview {
     std::unordered_map<std::string, SP<Render::ITexture>> labelTextureCache;
     std::unordered_map<WORKSPACEID, PHLANIMVAR<float>>    workspaceContentPan;
     std::unordered_map<WORKSPACEID, PHLWINDOWREF>         rememberedSelection;
+    std::vector<SForcedSurfaceVisibility>                 forcedSurfaceVisibility;
+    std::vector<SForcedWindowVisibility>                  forcedWindowVisibility;
     int                                                   mouseEdgeNavigationDirection  = 0;
     int                                                   mouseSnapPanDirection         = 0;
     bool                                                  mouseSnapPanBlockedUntilExit  = false;

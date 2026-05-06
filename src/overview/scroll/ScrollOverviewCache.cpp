@@ -118,7 +118,7 @@ void CScrollOverview::redrawWindowImage(SP<SWindowImage> img) {
 }
 
 bool CScrollOverview::windowImageRenderable(PHLWINDOW window) const {
-    if (closing || !pMonitor || !validMapped(window))
+    if (!pMonitor || !validMapped(window))
         return false;
 
     if (window->m_isX11)
