@@ -104,11 +104,11 @@ bool CScrollOverview::overviewWindowVisible(PHLWINDOW window) const {
     if (window->m_pinned && window->m_isFloating)
         return window->m_monitor == pMonitor;
 
-    const auto IMAGE = imageForRenderedWindow(window);
-    if (!IMAGE || IMAGE->overviewBox.empty())
+    const auto ENTRY = renderedWindowEntryForWindow(window);
+    if (!ENTRY || ENTRY->overviewBox.empty())
         return false;
 
-    return overviewBoxIntersectsMonitor(IMAGE->overviewBox) && !overviewWindowOccludedByFullscreen(window);
+    return overviewBoxIntersectsMonitor(ENTRY->overviewBox) && !overviewWindowOccludedByFullscreen(window);
 }
 
 bool CScrollOverview::surfaceTreeHasFrameCallbacks(SP<CWLSurfaceResource> surface) const {
@@ -165,15 +165,15 @@ bool CScrollOverview::shouldHandleSurfaceDamage(SP<CWLSurfaceResource> surface) 
 
     auto logDecision = [&](bool allow, std::string_view reason) {
         const auto WINDOW        = overviewWindowToRender(OWNER.window);
-        const auto IMAGE         = imageForRenderedWindow(WINDOW);
+        const auto ENTRY         = renderedWindowEntryForWindow(WINDOW);
         const auto LAYER_MONITOR = OWNER.layer ? OWNER.layer->m_monitor.lock() : PHLMONITOR{};
         Hyprview::telemetryLog(std::format(
             "event=surface-damage-decision allow={} reason={} owner={} surface={:x} overviewMonitor={} ownerMonitor={} window={:x} windowWorkspace={} image={} imageBox={} "
             "imageIntersects={} occluded={} layer={:x} layerNs={} layerLevel={} layerMapped={} layerValidMapped={}",
             allow ? 1 : 0, reason, ownerName(OWNER.type), reinterpret_cast<uintptr_t>(surface.get()), MONITOR ? MONITOR->m_name : "<none>",
             OWNER.monitor ? OWNER.monitor->m_name : "<none>", WINDOW ? reinterpret_cast<uintptr_t>(WINDOW.get()) : 0,
-            WINDOW && WINDOW->m_workspace ? std::to_string(WINDOW->m_workspace->m_id) : "<none>", IMAGE ? 1 : 0, IMAGE ? Hyprview::formatBox(IMAGE->overviewBox) : "<none>",
-            IMAGE ? overviewBoxIntersectsMonitor(IMAGE->overviewBox) : false, WINDOW ? overviewWindowOccludedByFullscreen(WINDOW) : false,
+            WINDOW && WINDOW->m_workspace ? std::to_string(WINDOW->m_workspace->m_id) : "<none>", ENTRY ? 1 : 0, ENTRY ? Hyprview::formatBox(ENTRY->overviewBox) : "<none>",
+            ENTRY ? overviewBoxIntersectsMonitor(ENTRY->overviewBox) : false, WINDOW ? overviewWindowOccludedByFullscreen(WINDOW) : false,
             OWNER.layer ? reinterpret_cast<uintptr_t>(OWNER.layer.get()) : 0, OWNER.layer ? OWNER.layer->m_namespace : "<none>", OWNER.layer ? sc<int>(OWNER.layer->m_layer) : -1,
             OWNER.layer ? OWNER.layer->m_mapped : false, OWNER.layer ? Desktop::View::validMapped(OWNER.layer) : false));
     };
@@ -213,8 +213,8 @@ bool CScrollOverview::shouldHandleSurfaceDamage(SP<CWLSurfaceResource> surface) 
         return false;
     }
 
-    const auto IMAGE = imageForRenderedWindow(WINDOW);
-    if (!IMAGE || overviewWindowOccludedByFullscreen(WINDOW) || !overviewBoxIntersectsMonitor(IMAGE->overviewBox)) {
+    const auto ENTRY = renderedWindowEntryForWindow(WINDOW);
+    if (!ENTRY || overviewWindowOccludedByFullscreen(WINDOW) || !overviewBoxIntersectsMonitor(ENTRY->overviewBox)) {
         logDecision(false, "window-not-visible-in-overview");
         return false;
     }
@@ -248,14 +248,14 @@ bool CScrollOverview::shouldAllowSurfaceFrame(SP<CWLSurfaceResource> surface, co
 
     auto logDecision = [&](bool allow, std::string_view reason) {
         const auto WINDOW = overviewWindowToRender(OWNER.window);
-        const auto IMAGE  = imageForRenderedWindow(WINDOW);
+        const auto ENTRY  = renderedWindowEntryForWindow(WINDOW);
         Hyprview::telemetryLog(std::format(
             "event=surface-frame-decision allow={} reason={} owner={} surface={:x} overviewMonitor={} ownerMonitor={} window={:x} windowWorkspace={} image={} imageBox={} "
             "imageIntersects={} overviewWindowVisible={} sendingOverviewFrameCallbacks={} layer={:x} layerNs={} layerLevel={} layerMapped={} layerValidMapped={}",
             allow ? 1 : 0, reason, ownerName(OWNER.type), reinterpret_cast<uintptr_t>(surface.get()), MONITOR ? MONITOR->m_name : "<none>",
             OWNER.monitor ? OWNER.monitor->m_name : "<none>", WINDOW ? reinterpret_cast<uintptr_t>(WINDOW.get()) : 0,
-            WINDOW && WINDOW->m_workspace ? std::to_string(WINDOW->m_workspace->m_id) : "<none>", IMAGE ? 1 : 0, IMAGE ? Hyprview::formatBox(IMAGE->overviewBox) : "<none>",
-            IMAGE ? overviewBoxIntersectsMonitor(IMAGE->overviewBox) : false, WINDOW ? overviewWindowVisible(WINDOW) : false, sendingOverviewFrameCallbacks ? 1 : 0,
+            WINDOW && WINDOW->m_workspace ? std::to_string(WINDOW->m_workspace->m_id) : "<none>", ENTRY ? 1 : 0, ENTRY ? Hyprview::formatBox(ENTRY->overviewBox) : "<none>",
+            ENTRY ? overviewBoxIntersectsMonitor(ENTRY->overviewBox) : false, WINDOW ? overviewWindowVisible(WINDOW) : false, sendingOverviewFrameCallbacks ? 1 : 0,
             OWNER.layer ? reinterpret_cast<uintptr_t>(OWNER.layer.get()) : 0, OWNER.layer ? OWNER.layer->m_namespace : "<none>", OWNER.layer ? sc<int>(OWNER.layer->m_layer) : -1,
             OWNER.layer ? OWNER.layer->m_mapped : false, OWNER.layer ? Desktop::View::validMapped(OWNER.layer) : false));
     };
@@ -330,7 +330,7 @@ bool CScrollOverview::shouldSuppressRenderDamage() const {
 
     for (const auto& window : g_pCompositor->m_windows) {
         const auto WINDOW = overviewWindowToRender(window);
-        if (!windowImageRenderable(WINDOW) || WINDOW->m_monitor != MONITOR || !overviewWindowVisible(WINDOW))
+        if (!windowLiveRenderable(WINDOW) || WINDOW->m_monitor != MONITOR || !overviewWindowVisible(WINDOW))
             continue;
 
         if (windowHasOverviewAnimation(WINDOW))
@@ -408,7 +408,7 @@ void CScrollOverview::sendOverviewFrameCallbacks(const Time::steady_tp& now) {
 
     auto                   frameWindow = [&](PHLWINDOW window) {
         window = overviewWindowToRender(window);
-        if (!windowImageRenderable(window) || !overviewWindowVisible(window))
+        if (!windowLiveRenderable(window) || !overviewWindowVisible(window))
             return;
 
         if (std::ranges::find(framedWindows, window) != framedWindows.end())
@@ -425,15 +425,15 @@ void CScrollOverview::sendOverviewFrameCallbacks(const Time::steady_tp& now) {
         sentWindowFrame = true;
     };
 
-    for (const auto& wimg : images) {
-        if (!wimg || wimg->overviewBox.empty() || !wimg->overviewBox.overlaps(CBox{{}, MONITOR->m_size}))
+    for (const auto& workspaceEntry : workspaceEntries) {
+        if (!workspaceEntry || workspaceEntry->overviewBox.empty() || !workspaceEntry->overviewBox.overlaps(CBox{{}, MONITOR->m_size}))
             continue;
 
-        for (const auto& img : wimg->windowImages) {
-            if (!img)
+        for (const auto& entry : workspaceEntry->windowEntries) {
+            if (!entry)
                 continue;
 
-            frameWindow(img->pWindow.lock());
+            frameWindow(entry->pWindow.lock());
         }
     }
 

@@ -121,7 +121,7 @@ void CScrollOverview::handlePointerMotion(const Vector2D& local) {
     }
 
     if (inputState.mode == ePointerMode::PRESS_PENDING) {
-        if (!inputState.draggedImage || !inputState.draggedWindow) {
+        if (!inputState.draggedEntry || !inputState.draggedWindow) {
             if (inputState.pressPosLocal.distance(local) >= DRAG_THRESHOLD)
                 cancelPointerInteraction();
             return;
@@ -163,16 +163,16 @@ void CScrollOverview::handlePointerPress(uint32_t button) {
     }
 
     inputState.mode          = ePointerMode::PRESS_PENDING;
-    inputState.draggedImage  = windowAt(lastMousePosLocal);
-    inputState.draggedWindow = inputState.draggedImage && inputState.draggedImage->pWindow ? inputState.draggedImage->pWindow : PHLWINDOWREF{};
+    inputState.draggedEntry  = windowAt(lastMousePosLocal);
+    inputState.draggedWindow = inputState.draggedEntry && inputState.draggedEntry->pWindow ? inputState.draggedEntry->pWindow : PHLWINDOWREF{};
 
     if (!windowCanDragAcrossWorkspaces(inputState.draggedWindow.lock())) {
-        inputState.draggedImage.reset();
+        inputState.draggedEntry.reset();
         inputState.draggedWindow.reset();
     }
 
-    if (inputState.draggedImage)
-        inputState.dragOffsetLocal = lastMousePosLocal - inputState.draggedImage->overviewBox.pos();
+    if (inputState.draggedEntry)
+        inputState.dragOffsetLocal = lastMousePosLocal - inputState.draggedEntry->overviewBox.pos();
 }
 
 void CScrollOverview::handlePointerRelease(uint32_t button) {
@@ -227,7 +227,7 @@ void CScrollOverview::handlePointerAxis(IPointer::SAxisEvent event) {
 }
 
 void CScrollOverview::beginWindowDrag() {
-    if (!inputState.draggedImage || !windowCanDragAcrossWorkspaces(inputState.draggedWindow.lock())) {
+    if (!inputState.draggedEntry || !windowCanDragAcrossWorkspaces(inputState.draggedWindow.lock())) {
         cancelPointerInteraction();
         return;
     }
@@ -260,7 +260,7 @@ void CScrollOverview::updateViewportPan(const Vector2D& local) {
     highlightHoverDebug(false);
 }
 
-bool CScrollOverview::snapMousePanForWorkspace(const SP<SWorkspaceImage>& workspace, int direction) {
+bool CScrollOverview::snapMousePanForWorkspace(const SP<SWorkspaceEntry>& workspace, int direction) {
     if (!workspace || !workspace->pWorkspace || direction == 0)
         return false;
 
@@ -276,10 +276,10 @@ bool CScrollOverview::snapMousePanForWorkspace(const SP<SWorkspaceImage>& worksp
     const double     CURRENT_PAN  = horizontalPanForWorkspace(workspace);
     const double     CENTER_GRACE = 1.0;
 
-    SP<SWindowImage> target;
+    SP<SWindowEntry> target;
     double           bestScore = std::numeric_limits<double>::max();
 
-    for (const auto& image : workspace->windowImages) {
+    for (const auto& image : workspace->windowEntries) {
         if (!image || !image->pWindow || image->overviewBox.empty())
             continue;
 
@@ -390,8 +390,8 @@ void CScrollOverview::updateMouseSnapPanNavigation(const Vector2D& local) {
         return;
     }
 
-    SP<SWorkspaceImage> WORKSPACE;
-    for (auto it = images.rbegin(); it != images.rend(); ++it) {
+    SP<SWorkspaceEntry> WORKSPACE;
+    for (auto it = workspaceEntries.rbegin(); it != workspaceEntries.rend(); ++it) {
         const auto& image = *it;
         if (!image || !image->pWorkspace)
             continue;
@@ -558,7 +558,7 @@ bool CScrollOverview::moveDraggedWindowToDropTarget() {
     raiseFloatingWindow(WINDOW);
     Desktop::focusState()->fullWindowFocus(WINDOW, Desktop::FOCUS_REASON_KEYBIND);
 
-    refreshWorkspaceImages(TARGET_WORKSPACE, false);
+    refreshWorkspaceEntries(TARGET_WORKSPACE, false);
 
     return OLD_WORKSPACE != TARGET_WORKSPACE;
 }
@@ -605,10 +605,10 @@ void CScrollOverview::highlightHoverDebug(bool damageOnChange) {
     }
 
     if (g_hyprviewConfig.keyboard.enabled) {
-        if (!imageForKeyboardSelection())
+        if (!entryForKeyboardSelection())
             syncSelectionToViewport(false);
 
-        if (const auto SELECTED = imageForKeyboardSelection())
+        if (const auto SELECTED = entryForKeyboardSelection())
             SELECTED->highlight = true;
     }
 

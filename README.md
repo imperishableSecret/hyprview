@@ -1,6 +1,6 @@
 # Hyprview
 
-Hyprview is a Hyprland plugin that adds a niri-like scrolling workspace overview. It shows workspace thumbnails for the current monitor, lets you select a workspace or window, drag windows between workspaces, and pan wide scrolling-layout workspaces inside the overview.
+Hyprview is a Hyprland plugin that adds a niri-like scrolling workspace overview. It shows live workspace cards for the current monitor, lets you select a workspace or window, drag windows between workspaces, and pan wide scrolling-layout workspaces inside the overview.
 
 ## Core features
 
@@ -8,22 +8,22 @@ Hyprview is a Hyprland plugin that adds a niri-like scrolling workspace overview
 | --- | --- |
 | Niri-like overview | Shows workspaces as a vertical scrolling overview instead of a grid. |
 | Per-monitor overview | Opens for the focused monitor and only includes workspaces from that monitor. |
-| Workspace thumbnails | Captures each visible overview workspace into thumbnail-sized window images. |
-| Live-ish thumbnail updates | Tracks window commits, damage, moves, and resizes, then redraws dirty window thumbnails before rendering the overview. |
+| Live workspace cards | Projects real Hyprland windows and layer-shell surfaces into workspace-card geometry. |
+| Live geometry records | Tracks per-window overview boxes, renderability, and visibility for rendering, hit testing, and keyboard selection. |
 | Window selection | Clicking a window closes the overview, switches to its workspace if needed, focuses the window, and warps the cursor to it. |
 | Workspace selection | Clicking a workspace closes the overview and switches to that workspace. |
 | Window dragging | Left-drag a non-pinned window inside the overview and drop it on another workspace. |
 | Workspace insertion markers | Drop a dragged window on a numbered insertion marker to create or select that workspace ID and move the window there. |
-| Horizontal content pan | Right-drag a workspace using Hyprland's `scrolling` tiled layout to pan tiled window thumbnails horizontally. |
+| Horizontal content pan | Right-drag a workspace using Hyprland's `scrolling` tiled layout to pan tiled window entries horizontally. |
 | Wheel navigation | Wheel input moves between overview workspaces by default. It can be configured to zoom instead. |
-| Keyboard selection | Optional Lua-controlled selection dispatchers move the selected thumbnail left/right/up/down and activate it. |
+| Keyboard selection | Optional Lua-controlled selection dispatchers move the selected window entry left/right/up/down and activate it. |
 | Normal Hyprland keybinds | Workspace switching, focus movement, and moving windows between workspaces keep working while the overview is open. Hyprview refreshes and recenters from the resulting Hyprland events. |
 | Active/selected distinction | Hyprview selection uses the main overview indicator. The real Hyprland active window gets a configurable secondary marker so focus changes do not hide what the overview will activate. |
 | Trackpad gesture | Lua config can register a trackpad gesture that opens the overview when closed and drives overview scale while swiping. |
 | Workspace badges | Optional workspace annotations can show ID, name, ID/name combinations, or window count. |
 | Hover/focus styling | Hovered windows can use a translucent overview box or Hyprland's active border gradient. |
 | Drag feedback | Valid and invalid drag targets use separate overlay colors and preview opacity. |
-| Backdrop modes | Uses a captured background by default, or a manually captured blurred background when `background_blur = true`. |
+| Backdrop modes | Renders live background layers and can blur them through Hyprland's monitor preblur resource when `background_blur = true`. |
 | Lua API | Provides Lua functions for configure, overview control, close, moving the hovered window, and gesture registration. |
 | Dispatcher | Registers `hyprview:overview` internally. Lua users normally call `hl.plugin.hyprview.overview(...)`, which wraps the same action path. |
 
@@ -192,13 +192,13 @@ Mouse options:
 
 | property | type | default | description |
 | --- | --- | --- | --- |
-| `select_follows_hover` | boolean | `true` | Pointer hover updates the selected thumbnail. Disable this if keyboard selection should stay fixed until keyboard navigation changes it. |
+| `select_follows_hover` | boolean | `true` | Pointer hover updates the selected window entry. Disable this if keyboard selection should stay fixed until keyboard navigation changes it. |
 | `edge_navigation` | boolean | `true` | Pointer motion near the top/bottom overview edge moves the workspace viewport. Disable this to rely on wheel input or right-click drag panning instead. |
 | `edge_navigation_snap` | boolean | `true` | Move one workspace when the pointer enters the top/bottom edge zone, then wait until the pointer leaves and re-enters before moving again. Disable to restore continuous edge motion. |
 | `edge_navigation_speed` | float | `1.0` | Pointer edge-navigation speed multiplier used when `edge_navigation_snap = false`. Higher values move through overview workspaces faster. |
-| `hitbox_expansion` | integer | `16` | Extra logical pixels around each window thumbnail for pointer hit testing. Set to `0` to restore exact thumbnail-only hits. |
-| `nearest_hitbox` | boolean | `true` | If expanded hitboxes overlap, choose the nearest real thumbnail. If disabled, the first expanded hit in reverse render order wins. |
-| `snap_pan` | boolean | `true` | Enables pointer-driven horizontal snap panning for scrolling-layout workspace thumbnails. Right-click drag panning still works when this is disabled. |
+| `hitbox_expansion` | integer | `16` | Extra logical pixels around each live window entry for pointer hit testing. Set to `0` to restore exact entry-only hits. |
+| `nearest_hitbox` | boolean | `true` | If expanded hitboxes overlap, choose the nearest real window entry. If disabled, the first expanded hit in reverse render order wins. |
+| `snap_pan` | boolean | `true` | Enables pointer-driven horizontal snap panning for scrolling-layout workspace cards. Right-click drag panning still works when this is disabled. |
 | `snap_pan_zone` | integer | `96` | Left/right screen edge size, in logical pixels, used for horizontal snap panning. |
 
 Scrolling options:
@@ -207,14 +207,14 @@ Scrolling options:
 | --- | --- | --- | --- |
 | `scroll_moves_up_down` | boolean | `true` | If enabled, vertical wheel/scroll input moves between overview workspaces. If disabled, wheel/scroll input changes zoom. |
 | `default_zoom` | float | `0.5` | Default overview zoom, clamped to `0.1..0.9` when opening or completing a gesture. |
-| `window_gap` | integer | `0` | Visual gap between window thumbnails. Values below `0` render as `0`. |
+| `window_gap` | integer | `0` | Visual gap between live window entries. Values below `0` render as `0`. |
 | `workspace_gap` | integer | `0` | Visual gap between workspace cards in the overview stack. Values below `0` render as `0`. |
 | `background_blur` | boolean | `false` | Blur the live backdrop after layer-shell background surfaces are rendered. |
 | `show_workspace_layers` | boolean | `true` | Render background and bottom layer-shell surfaces inside each workspace card. |
-| `backdrop_col` | color | `rgba(000000ff)` | Base color drawn before live backdrop layers and behind overview thumbnails. |
-| `workspace_shadow_col` | color | `rgba(00000000)` | Optional shadow color behind workspace thumbnails. Alpha `0` disables visible shadows. |
-| `workspace_shadow_size` | integer | `0` | Shadow expansion around workspace thumbnails. Values below `0` render as `0`. |
-| `focus_indicator` | string | `overview_box` | `overview_box` draws the hover color over the selected thumbnail. `active_border` draws Hyprland's active border gradient. Other values fall back to `overview_box`. |
+| `backdrop_col` | color | `rgba(000000ff)` | Base color drawn before live backdrop layers and behind overview cards. |
+| `workspace_shadow_col` | color | `rgba(00000000)` | Optional shadow color behind workspace cards. Alpha `0` disables visible shadows. |
+| `workspace_shadow_size` | integer | `0` | Shadow expansion around workspace cards. Values below `0` render as `0`. |
+| `focus_indicator` | string | `overview_box` | `overview_box` draws the hover color over the selected live window entry. `active_border` draws Hyprland's active border gradient. Other values fall back to `overview_box`. |
 | `active_border_size` | integer | `4` | Border thickness used by `active_border`, clamped to `1..64`. |
 | `hover_col` | color | `rgba(a7c7ff33)` | Hover overlay color for `overview_box` and valid drag previews. |
 | `drop_target_col` | color | `rgba(a7c7ff22)` | Workspace-body drop highlight color while dragging a window. |
@@ -252,7 +252,7 @@ Pinned windows are shown only on the active workspace for the current monitor an
 
 Floating windows are rendered after tiled windows and are raised when selected or dragged. Horizontal right-drag panning affects tiled windows only; floating windows keep their normal position.
 
-When windows open, close, move between workspaces, or change active focus while the overview is open, Hyprview queues a refresh and recenters the overview. Keybind-driven focus changes also briefly warp the cursor to the newly focused window thumbnail.
+When windows open, close, move between workspaces, or change active focus while the overview is open, Hyprview queues a refresh and recenters the overview. Keybind-driven focus changes also briefly warp the cursor to the newly focused live window entry.
 
 ## Insertion markers
 
@@ -270,12 +270,12 @@ Insertion targets respect monitor-bound workspace rules. Existing target workspa
 | Left drag a window | Drag that window inside the overview. Pinned windows cannot be dragged across workspaces. |
 | Release dragged window over a workspace | Move the window to that workspace, activate that workspace without stealing focus from the dragged window, focus the dragged window, and refresh the overview. |
 | Release dragged window over a numbered insertion marker | Create or select that workspace ID, move the window there, focus it, and refresh the overview. |
-| Right drag | Pan tiled thumbnails inside the hovered scrolling-layout workspace horizontally. |
+| Right drag | Pan tiled entries inside the hovered scrolling-layout workspace horizontally. |
 | Mouse wheel with `scroll_moves_up_down = true` | Move the overview up/down by workspace. Wheel steps move one workspace; smooth vertical scrolling accumulates until the threshold is reached. Horizontal scroll axes are ignored. |
 | Mouse wheel with `scroll_moves_up_down = false` | Zoom the overview in/out. Zoom is clamped to `0.05..0.95` while wheel-zooming. |
 | Touch press | Select the hovered workspace/window and close the overview. |
-| `hl.plugin.hyprview.selection_left` | Move the selected thumbnail left within the current workspace. |
-| `hl.plugin.hyprview.selection_right` | Move the selected thumbnail right within the current workspace. |
+| `hl.plugin.hyprview.selection_left` | Move the selected live window entry left within the current workspace. |
+| `hl.plugin.hyprview.selection_right` | Move the selected live window entry right within the current workspace. |
 | `hl.plugin.hyprview.selection_up` | Move to the previous overview workspace and restore its remembered selection. |
 | `hl.plugin.hyprview.selection_down` | Move to the next overview workspace and restore its remembered selection. |
 | `hl.plugin.hyprview.selection_activate` | Focus the selected window. By default this also closes the overview. |
@@ -285,7 +285,7 @@ While dragging a window, hovering a workspace body for `hover_activate_ms` cente
 
 Hyprland focus changes always update Hyprview selection while the overview is open, so normal focus keybinds and overview selection agree on the current target. `focus_follows_selection` controls the opposite direction: when enabled, overview keyboard selection also moves real Hyprland focus immediately. The active Hyprland window is shown with `active_indicator`; if active and selected are the same window, the selected indicator remains primary and the active marker is drawn on top.
 
-Outside a drag, pointer workspace navigation is snap-based by default: entering the top or bottom edge zone moves one workspace and waits for the pointer to leave the zone before moving again. Scrolling-layout thumbnails also support horizontal snap panning from the left or right screen edge. A horizontal snap centers the next tiled thumbnail in that direction and waits until the pointer leaves the edge before snapping again. Right-click drag remains the manual continuous pan path.
+Outside a drag, pointer workspace navigation is snap-based by default: entering the top or bottom edge zone moves one workspace and waits for the pointer to leave the zone before moving again. Scrolling-layout workspace cards also support horizontal snap panning from the left or right screen edge. A horizontal snap centers the next tiled live window entry in that direction and waits until the pointer leaves the edge before snapping again. Right-click drag remains the manual continuous pan path.
 
 ## Gesture behavior
 
@@ -369,9 +369,8 @@ The older snapshot/background framebuffer path still exists for the remaining mi
 | Horizontal pan scope | Right-drag panning only works for workspaces whose tiled algorithm name is `scrolling`; it pans tiled windows only. |
 | Workspace insertion scope | Insertion markers only use positive numeric workspace IDs and obey monitor-bound workspace rules. |
 | Unknown config strings | Unknown `focus_indicator`, `workspace_annotation`, or annotation position values fall back to the default behavior rather than failing config. |
-| Background blur cost | `background_blur = true` captures and blurs the workspace background manually, which can be heavier than the default captured background. |
-| Screen shader blocking | Fake renders set `blockScreenShader` to avoid applying screen shaders to thumbnail/background captures. |
-| Cursor sync | Keybind-driven focus changes can warp the cursor to the focused thumbnail for a short sync window. |
-| Background freshness | The background is captured when overview images refresh; individual window thumbnails are the parts that update from damage/commit tracking. |
+| Background blur cost | `background_blur = true` renders live background layers and routes them through Hyprland's monitor preblur resource, which is heavier than an unblurred backdrop. |
+| Cursor sync | Keybind-driven focus changes can warp the cursor to the focused live window entry for a short sync window. |
+| Background freshness | The backdrop and window content are live-rendered from Hyprland surfaces while the overview is open. |
 | Bring action target | `bring` does not require hovering a specific window. It chooses the topmost mapped, non-hidden window from the selected workspace. |
 | Unknown overview actions | Unknown actions open the overview when closed and otherwise do nothing. |

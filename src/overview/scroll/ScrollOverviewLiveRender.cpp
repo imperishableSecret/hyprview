@@ -121,10 +121,6 @@ namespace {
     }
 }
 
-bool CScrollOverview::snapshotFallbackActive() const {
-    return false;
-}
-
 PHLWINDOW CScrollOverview::overviewWindowToRender(PHLWINDOW window) const {
     if (!window)
         return nullptr;
@@ -135,25 +131,42 @@ PHLWINDOW CScrollOverview::overviewWindowToRender(PHLWINDOW window) const {
     return window;
 }
 
-SP<CScrollOverview::SWindowImage> CScrollOverview::imageForRenderedWindow(PHLWINDOW window) const {
+PHLWINDOW CScrollOverview::windowForEntry(const SP<SWindowEntry>& image) const {
+    if (!image)
+        return nullptr;
+
+    return overviewWindowToRender(image->pWindow.lock());
+}
+
+SP<CScrollOverview::SWindowEntry> CScrollOverview::renderedWindowEntryForWindow(PHLWINDOW window) const {
     const auto TARGET = overviewWindowToRender(window);
     if (!TARGET)
         return nullptr;
 
-    for (const auto& wimg : images) {
-        if (!wimg)
+    for (const auto& workspaceEntry : workspaceEntries) {
+        if (!workspaceEntry)
             continue;
 
-        for (const auto& img : wimg->windowImages) {
-            if (!img)
+        for (const auto& entry : workspaceEntry->windowEntries) {
+            if (!entry)
                 continue;
 
-            if (overviewWindowToRender(img->pWindow.lock()) == TARGET)
-                return img;
+            if (overviewWindowToRender(entry->pWindow.lock()) == TARGET)
+                return entry;
         }
     }
 
     return nullptr;
+}
+
+bool CScrollOverview::windowEntryRenderable(const SP<SWindowEntry>& image) const {
+    return windowLiveRenderable(windowForEntry(image));
+}
+
+bool CScrollOverview::windowEntryVisible(const SP<SWindowEntry>& image) const {
+    const auto WINDOW = windowForEntry(image);
+    return image && WINDOW && image->liveRenderable && !image->overviewBox.empty() && overviewBoxIntersectsMonitor(image->overviewBox) &&
+        !overviewWindowOccludedByFullscreen(WINDOW);
 }
 
 bool CScrollOverview::overviewBoxIntersectsMonitor(const CBox& box) const {
@@ -291,14 +304,8 @@ bool CScrollOverview::renderWindowLive(PHLWINDOW window, const CBox& box, const 
         return false;
     }
 
-    if (!windowImageRenderable(window)) {
-        if (const auto IMAGE = imageForRenderedWindow(window); IMAGE && IMAGE->fb) {
-            logWindowTelemetry("render-window-fallback-snapshot", window, box, INTERSECTS, "not-live-renderable");
-            renderWindowImage(IMAGE, box, alpha);
-            return true;
-        }
-
-        logWindowTelemetry("render-window-skip", window, box, INTERSECTS, "not-live-renderable-no-snapshot");
+    if (!windowLiveRenderable(window)) {
+        logWindowTelemetry("render-window-skip", window, box, INTERSECTS, "not-live-renderable");
         return false;
     }
 
@@ -354,44 +361,44 @@ bool CScrollOverview::renderWindowLive(PHLWINDOW window, const CBox& box, const 
     return true;
 }
 
-void CScrollOverview::renderWorkspaceLive(const SP<SWorkspaceImage>& workspaceImage, const Time::steady_tp& now) {
-    if (!workspaceImage || !workspaceImage->pWorkspace || workspaceImage->overviewBox.empty()) {
+void CScrollOverview::renderWorkspaceLive(const SP<SWorkspaceEntry>& workspaceEntry, const Time::steady_tp& now) {
+    if (!workspaceEntry || !workspaceEntry->pWorkspace || workspaceEntry->overviewBox.empty()) {
         Hyprview::telemetryLog(std::format("frame={} event=workspace-skip reason=invalid-workspace-image", g_currentTelemetryFrame));
         return;
     }
 
     const auto MONITOR = pMonitor.lock();
 
-    const bool WORKSPACE_INTERSECTS = overviewBoxIntersectsMonitor(workspaceImage->overviewBox);
-    const auto PAN_RANGE            = horizontalPanRangeForWorkspace(workspaceImage);
-    const auto PAN                  = horizontalPanForWorkspace(workspaceImage);
-    const auto INDEX                = workspaceImageIndex(workspaceImage->pWorkspace);
+    const bool WORKSPACE_INTERSECTS = overviewBoxIntersectsMonitor(workspaceEntry->overviewBox);
+    const auto PAN_RANGE            = horizontalPanRangeForWorkspace(workspaceEntry);
+    const auto PAN                  = horizontalPanForWorkspace(workspaceEntry);
+    const auto INDEX                = workspaceEntryIndex(workspaceEntry->pWorkspace);
     const auto SELECTED_WINDOW      = overviewWindowToRender(keyboardSelectedWindow.lock());
     const auto ACTIVE_WINDOW        = overviewWindowToRender(Desktop::focusState()->window());
-    const auto SELECTED_IMAGE       = imageForRenderedWindow(SELECTED_WINDOW);
-    const auto ACTIVE_IMAGE         = imageForRenderedWindow(ACTIVE_WINDOW);
+    const auto SELECTED_ENTRY       = renderedWindowEntryForWindow(SELECTED_WINDOW);
+    const auto ACTIVE_ENTRY         = renderedWindowEntryForWindow(ACTIVE_WINDOW);
     const bool SELECTED_IN_WORKSPACE =
-        SELECTED_WINDOW && windowBelongsToWorkspaceInOverview(SELECTED_WINDOW, workspaceImage->pWorkspace) && workspaceImageForWindowImage(SELECTED_IMAGE) == workspaceImage;
+        SELECTED_WINDOW && windowBelongsToWorkspaceInOverview(SELECTED_WINDOW, workspaceEntry->pWorkspace) && workspaceEntryForWindowEntry(SELECTED_ENTRY) == workspaceEntry;
     const bool ACTIVE_IN_WORKSPACE =
-        ACTIVE_WINDOW && windowBelongsToWorkspaceInOverview(ACTIVE_WINDOW, workspaceImage->pWorkspace) && workspaceImageForWindowImage(ACTIVE_IMAGE) == workspaceImage;
+        ACTIVE_WINDOW && windowBelongsToWorkspaceInOverview(ACTIVE_WINDOW, workspaceEntry->pWorkspace) && workspaceEntryForWindowEntry(ACTIVE_ENTRY) == workspaceEntry;
 
     Hyprview::telemetryLog(std::format(
         "frame={} event=workspace-enter index={} workspace={} name={} scrolling={} overviewBox={} hitBox={} intersects={} pan={:.2f} panRange={:.2f},{:.2f} "
         "selected={} selectedWorkspace={} selectedInWorkspace={} selectedBox={} active={} activeWorkspace={} activeInWorkspace={} activeBox={} windows={}",
-        g_currentTelemetryFrame, INDEX ? std::to_string(*INDEX) : "<none>", workspaceID(workspaceImage->pWorkspace), workspaceImage->pWorkspace->m_name,
-        boolText(workspaceUsesScrollingLayout(workspaceImage->pWorkspace)), Hyprview::formatBox(workspaceImage->overviewBox), Hyprview::formatBox(workspaceImage->hitBox),
+        g_currentTelemetryFrame, INDEX ? std::to_string(*INDEX) : "<none>", workspaceID(workspaceEntry->pWorkspace), workspaceEntry->pWorkspace->m_name,
+        boolText(workspaceUsesScrollingLayout(workspaceEntry->pWorkspace)), Hyprview::formatBox(workspaceEntry->overviewBox), Hyprview::formatBox(workspaceEntry->hitBox),
         boolText(WORKSPACE_INTERSECTS), PAN, PAN_RANGE.min, PAN_RANGE.max, windowID(SELECTED_WINDOW), workspaceID(SELECTED_WINDOW ? SELECTED_WINDOW->m_workspace : PHLWORKSPACE{}),
-        boolText(SELECTED_IN_WORKSPACE), SELECTED_IN_WORKSPACE && SELECTED_IMAGE ? Hyprview::formatBox(SELECTED_IMAGE->overviewBox) : "<none>", windowID(ACTIVE_WINDOW),
+        boolText(SELECTED_IN_WORKSPACE), SELECTED_IN_WORKSPACE && SELECTED_ENTRY ? Hyprview::formatBox(SELECTED_ENTRY->overviewBox) : "<none>", windowID(ACTIVE_WINDOW),
         workspaceID(ACTIVE_WINDOW ? ACTIVE_WINDOW->m_workspace : PHLWORKSPACE{}), boolText(ACTIVE_IN_WORKSPACE),
-        ACTIVE_IN_WORKSPACE && ACTIVE_IMAGE ? Hyprview::formatBox(ACTIVE_IMAGE->overviewBox) : "<none>", workspaceImage->windowImages.size()));
+        ACTIVE_IN_WORKSPACE && ACTIVE_ENTRY ? Hyprview::formatBox(ACTIVE_ENTRY->overviewBox) : "<none>", workspaceEntry->windowEntries.size()));
 
     if (!WORKSPACE_INTERSECTS) {
         Hyprview::telemetryLog(std::format("frame={} event=workspace-skip reason=outside-monitor workspace={} overviewBox={}", g_currentTelemetryFrame,
-                                           workspaceID(workspaceImage->pWorkspace), Hyprview::formatBox(workspaceImage->overviewBox)));
+                                           workspaceID(workspaceEntry->pWorkspace), Hyprview::formatBox(workspaceEntry->overviewBox)));
         return;
     }
 
-    const auto WORKSPACE          = workspaceImage->pWorkspace;
+    const auto WORKSPACE          = workspaceEntry->pWorkspace;
     const bool WAS_VISIBLE        = WORKSPACE->m_visible;
     const bool WAS_FORCE_RENDERED = WORKSPACE->m_forceRendering;
     WORKSPACE->m_visible          = true;
@@ -403,8 +410,8 @@ void CScrollOverview::renderWorkspaceLive(const SP<SWorkspaceImage>& workspaceIm
     });
 
     if (g_hyprviewConfig.scrolling.showWorkspaceLayers) {
-        renderWorkspaceLayerLevel(workspaceImage, ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND, now);
-        renderWorkspaceLayerLevel(workspaceImage, ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM, now);
+        renderWorkspaceLayerLevel(workspaceEntry, ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND, now);
+        renderWorkspaceLayerLevel(workspaceEntry, ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM, now);
     }
 
     std::vector<PHLWINDOW> renderedWindows;
@@ -415,75 +422,76 @@ void CScrollOverview::renderWorkspaceLive(const SP<SWorkspaceImage>& workspaceIm
     size_t                 skippedTiny      = 0;
     size_t                 skippedDuplicate = 0;
 
-    auto                   renderImage = [&](const SP<SWindowImage>& img) {
-        if (!img)
+    auto                   renderImage = [&](const SP<SWindowEntry>& entry) {
+        if (!entry)
             return;
 
-        const auto WINDOW     = overviewWindowToRender(img->pWindow.lock());
-        const bool RENDERABLE = windowImageRenderable(WINDOW);
-        const bool INTERSECTS = img ? overviewBoxIntersectsMonitor(img->overviewBox) : false;
+        const auto WINDOW     = windowForEntry(entry);
+        const bool RENDERABLE = entry->liveRenderable;
+        const bool INTERSECTS = entry ? overviewBoxIntersectsMonitor(entry->overviewBox) : false;
         const CBox CURRENT_RAW =
             WINDOW && MONITOR && WINDOW->m_realPosition && WINDOW->m_realSize ? CBox{WINDOW->m_realPosition->value() - MONITOR->m_position, WINDOW->m_realSize->value()} : CBox{};
         const CBox GOAL_RAW =
             WINDOW && MONITOR && WINDOW->m_realPosition && WINDOW->m_realSize ? CBox{WINDOW->m_realPosition->goal() - MONITOR->m_position, WINDOW->m_realSize->goal()} : CBox{};
-        logWindowTelemetry("window-candidate", WINDOW, img ? img->overviewBox : CBox{}, INTERSECTS,
+        logWindowTelemetry("window-candidate", WINDOW, entry ? entry->overviewBox : CBox{}, INTERSECTS,
                            std::format("renderable={} dragged={} pinnedFloating={} selected={} active={} workspaceMatch={} currentRaw={} goalRaw={} pan={:.2f} scale={:.5f}",
                                        boolText(RENDERABLE), boolText(WINDOW == DRAGGED_WINDOW), boolText(WINDOW && WINDOW->m_pinned && WINDOW->m_isFloating),
                                        boolText(WINDOW && WINDOW == SELECTED_WINDOW), boolText(WINDOW && WINDOW == ACTIVE_WINDOW),
-                                       boolText(WINDOW && windowBelongsToWorkspaceInOverview(WINDOW, workspaceImage->pWorkspace)), Hyprview::formatBox(CURRENT_RAW),
+                                       boolText(WINDOW && windowBelongsToWorkspaceInOverview(WINDOW, workspaceEntry->pWorkspace)), Hyprview::formatBox(CURRENT_RAW),
                                        Hyprview::formatBox(GOAL_RAW), PAN, scale->value()));
 
         if (!RENDERABLE || WINDOW == DRAGGED_WINDOW || (WINDOW->m_pinned && WINDOW->m_isFloating)) {
             ++skippedState;
-            logWindowTelemetry("window-candidate-skip", WINDOW, img ? img->overviewBox : CBox{}, INTERSECTS,
+            logWindowTelemetry("window-candidate-skip", WINDOW, entry ? entry->overviewBox : CBox{}, INTERSECTS,
                                !RENDERABLE ? "not-live-renderable" : (WINDOW == DRAGGED_WINDOW ? "dragged-window" : "pinned-floating"));
             return;
         }
 
         if (std::ranges::find(renderedWindows, WINDOW) != renderedWindows.end()) {
             ++skippedDuplicate;
-            logWindowTelemetry("window-candidate-skip", WINDOW, img->overviewBox, INTERSECTS, "duplicate-rendered-window");
+            logWindowTelemetry("window-candidate-skip", WINDOW, entry->overviewBox, INTERSECTS, "duplicate-rendered-window");
             return;
         }
 
         if (!INTERSECTS) {
             ++skippedCull;
-            logWindowTelemetry("window-candidate-skip", WINDOW, img->overviewBox, INTERSECTS, "outside-monitor");
+            logWindowTelemetry("window-candidate-skip", WINDOW, entry->overviewBox, INTERSECTS, "outside-monitor");
             return;
         }
 
-        if (overviewBoxTooSmallForLiveRender(img->overviewBox)) {
+        if (overviewBoxTooSmallForLiveRender(entry->overviewBox)) {
             ++skippedTiny;
-            logWindowTelemetry("window-candidate-skip", WINDOW, img->overviewBox, INTERSECTS, "tiny-window");
+            logWindowTelemetry("window-candidate-skip", WINDOW, entry->overviewBox, INTERSECTS, "tiny-window");
             return;
         }
 
         renderedWindows.emplace_back(WINDOW);
-        if (renderWindowLive(WINDOW, img->overviewBox, now))
+        if (renderWindowLive(WINDOW, entry->overviewBox, now))
             ++submittedWindows;
     };
 
     const auto FULLSCREEN_WINDOW = overviewWindowToRender(WORKSPACE->getFullscreenWindow());
-    if (windowImageRenderable(FULLSCREEN_WINDOW) && FULLSCREEN_WINDOW->m_workspace == WORKSPACE) {
-        if (const auto IMAGE = imageForRenderedWindow(FULLSCREEN_WINDOW))
-            renderImage(IMAGE);
+    if (const auto FULLSCREEN_ENTRY = renderedWindowEntryForWindow(FULLSCREEN_WINDOW);
+        FULLSCREEN_ENTRY && FULLSCREEN_ENTRY->liveRenderable && FULLSCREEN_WINDOW->m_workspace == WORKSPACE) {
+        if (const auto ENTRY = renderedWindowEntryForWindow(FULLSCREEN_WINDOW))
+            renderImage(ENTRY);
 
-        for (const auto& img : workspaceImage->windowImages) {
-            const auto WINDOW = overviewWindowToRender(img ? img->pWindow.lock() : nullptr);
+        for (const auto& entry : workspaceEntry->windowEntries) {
+            const auto WINDOW = windowForEntry(entry);
             if (WINDOW && WINDOW->m_isFloating && WINDOW != FULLSCREEN_WINDOW)
-                renderImage(img);
+                renderImage(entry);
         }
 
         return;
     }
 
     auto renderByState = [&](bool fullscreen, bool floating) {
-        for (const auto& img : workspaceImage->windowImages) {
-            const auto WINDOW = overviewWindowToRender(img ? img->pWindow.lock() : nullptr);
+        for (const auto& entry : workspaceEntry->windowEntries) {
+            const auto WINDOW = windowForEntry(entry);
             if (!WINDOW || WINDOW->isFullscreen() != fullscreen || WINDOW->m_isFloating != floating)
                 continue;
 
-            renderImage(img);
+            renderImage(entry);
         }
     };
 
@@ -493,15 +501,15 @@ void CScrollOverview::renderWorkspaceLive(const SP<SWorkspaceImage>& workspaceIm
     renderByState(true, true);
 
     Hyprview::telemetryLog(std::format("frame={} event=workspace-render-summary workspace={} submitted={} skippedState={} skippedCull={} skippedTiny={} skippedDuplicate={}",
-                                       g_currentTelemetryFrame, workspaceID(workspaceImage->pWorkspace), submittedWindows, skippedState, skippedCull, skippedTiny,
+                                       g_currentTelemetryFrame, workspaceID(workspaceEntry->pWorkspace), submittedWindows, skippedState, skippedCull, skippedTiny,
                                        skippedDuplicate));
 }
 
 void CScrollOverview::renderDraggedWindowLive(const Time::steady_tp& now) {
-    if (inputState.mode != ePointerMode::WINDOW_DRAG || !inputState.draggedImage)
+    if (inputState.mode != ePointerMode::WINDOW_DRAG || !inputState.draggedEntry)
         return;
 
-    const auto WINDOW = overviewWindowToRender(inputState.draggedWindow.lock() ? inputState.draggedWindow.lock() : inputState.draggedImage->pWindow.lock());
+    const auto WINDOW = overviewWindowToRender(inputState.draggedWindow.lock() ? inputState.draggedWindow.lock() : inputState.draggedEntry->pWindow.lock());
     if (!WINDOW)
         return;
 
@@ -527,7 +535,7 @@ void CScrollOverview::renderPinnedFloatingWindowsLive(const Time::steady_tp& now
 
     for (const auto& candidate : g_pCompositor->m_windows) {
         const auto WINDOW = overviewWindowToRender(candidate);
-        if (!windowImageRenderable(WINDOW) || !WINDOW->m_pinned || !WINDOW->m_isFloating || WINDOW->m_monitor != MONITOR || WINDOW == DRAGGED_WINDOW)
+        if (!windowLiveRenderable(WINDOW) || !WINDOW->m_pinned || !WINDOW->m_isFloating || WINDOW->m_monitor != MONITOR || WINDOW == DRAGGED_WINDOW)
             continue;
 
         if (std::ranges::find(renderedWindows, WINDOW) != renderedWindows.end())
@@ -535,8 +543,8 @@ void CScrollOverview::renderPinnedFloatingWindowsLive(const Time::steady_tp& now
 
         renderedWindows.emplace_back(WINDOW);
 
-        if (const auto IMAGE = imageForRenderedWindow(WINDOW)) {
-            renderWindowLive(WINDOW, IMAGE->overviewBox, now);
+        if (const auto ENTRY = renderedWindowEntryForWindow(WINDOW)) {
+            renderWindowLive(WINDOW, ENTRY->overviewBox, now);
             continue;
         }
 
@@ -553,15 +561,15 @@ void CScrollOverview::renderOverviewLive(const Time::steady_tp& now) {
     rebuildGeometryCache();
     ++g_currentTelemetryFrame;
 
-    Hyprview::telemetryLog(
-        std::format("frame={} event=overview-start monitor={} monitorSize={} monitorPixel={} scale={:.5f} viewOffset={} images={} activeIndex={} viewportIndex={} closing={} "
-                    "swipe={} selected={} selectedWorkspace={} active={} activeWorkspace={}",
-                    g_currentTelemetryFrame, monitorName(MONITOR), Hyprview::formatVector(MONITOR->m_size), Hyprview::formatVector(MONITOR->m_pixelSize), scale->value(),
-                    Hyprview::formatVector(viewOffset->value()), images.size(), activeWorkspaceImageIndex(), viewportCurrentWorkspace, boolText(closing), boolText(swipe),
-                    windowID(overviewWindowToRender(keyboardSelectedWindow.lock())),
-                    workspaceID(keyboardSelectedWindow && keyboardSelectedWindow->m_workspace ? keyboardSelectedWindow->m_workspace : PHLWORKSPACE{}),
-                    windowID(overviewWindowToRender(Desktop::focusState()->window())),
-                    workspaceID(Desktop::focusState()->window() && Desktop::focusState()->window()->m_workspace ? Desktop::focusState()->window()->m_workspace : PHLWORKSPACE{})));
+    Hyprview::telemetryLog(std::format(
+        "frame={} event=overview-start monitor={} monitorSize={} monitorPixel={} scale={:.5f} viewOffset={} workspaceEntries={} activeIndex={} viewportIndex={} closing={} "
+        "swipe={} selected={} selectedWorkspace={} active={} activeWorkspace={}",
+        g_currentTelemetryFrame, monitorName(MONITOR), Hyprview::formatVector(MONITOR->m_size), Hyprview::formatVector(MONITOR->m_pixelSize), scale->value(),
+        Hyprview::formatVector(viewOffset->value()), workspaceEntries.size(), activeWorkspaceEntryIndex(), viewportCurrentWorkspace, boolText(closing), boolText(swipe),
+        windowID(overviewWindowToRender(keyboardSelectedWindow.lock())),
+        workspaceID(keyboardSelectedWindow && keyboardSelectedWindow->m_workspace ? keyboardSelectedWindow->m_workspace : PHLWORKSPACE{}),
+        windowID(overviewWindowToRender(Desktop::focusState()->window())),
+        workspaceID(Desktop::focusState()->window() && Desktop::focusState()->window()->m_workspace ? Desktop::focusState()->window()->m_workspace : PHLWORKSPACE{})));
 
     {
         const bool PREVIOUS_BLOCK_SURFACE_FEEDBACK = g_pHyprRenderer->m_bBlockSurfaceFeedback;
@@ -577,32 +585,31 @@ void CScrollOverview::renderOverviewLive(const Time::steady_tp& now) {
 
         renderWorkspaceShadows();
 
-        for (const auto& wimg : images)
-            renderWorkspaceLive(wimg, now);
+        for (const auto& workspaceEntry : workspaceEntries)
+            renderWorkspaceLive(workspaceEntry, now);
 
         const auto DRAGGED_WINDOW = overviewWindowToRender(inputState.draggedWindow.lock());
-        for (const auto& wimg : images) {
-            if (!wimg)
+        for (const auto& workspaceEntry : workspaceEntries) {
+            if (!workspaceEntry)
                 continue;
 
-            bool dirty = false;
-            for (const auto& img : wimg->windowImages) {
-                if (!img || !img->pWindow) {
-                    dirty = true;
+            bool needsPrune = false;
+            for (const auto& entry : workspaceEntry->windowEntries) {
+                if (!entry || !entry->pWindow) {
+                    needsPrune = true;
                     continue;
                 }
 
-                const auto WINDOW = overviewWindowToRender(img->pWindow.lock());
-                if (!windowImageRenderable(WINDOW) || WINDOW == DRAGGED_WINDOW || overviewWindowOccludedByFullscreen(WINDOW) || (WINDOW->m_pinned && WINDOW->m_isFloating) ||
-                    !overviewBoxIntersectsMonitor(img->overviewBox))
+                const auto WINDOW = windowForEntry(entry);
+                if (!entry->liveVisible || WINDOW == DRAGGED_WINDOW || (WINDOW && WINDOW->m_pinned && WINDOW->m_isFloating))
                     continue;
 
-                renderFocusIndicator(img);
-                renderActiveWindowIndicator(img);
+                renderFocusIndicator(entry);
+                renderActiveWindowIndicator(entry);
             }
 
-            if (dirty)
-                std::erase_if(wimg->windowImages, [](const auto& img) { return !img || !img->pWindow; });
+            if (needsPrune)
+                std::erase_if(workspaceEntry->windowEntries, [](const auto& entry) { return !entry || !entry->pWindow; });
         }
 
         renderWorkspaceAnnotations();

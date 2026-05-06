@@ -1,605 +1,237 @@
-# Hyprview Live Rendering Migration Plan
+# Hyprview Live Rendering Plan
 
 ## Decision
 
-Migrate Hyprview from a snapshot-first overview renderer to a live compositor-surface renderer.
+Hyprview is now a live-rendering overview. The snapshot model is retired as a design target.
 
-Snapshots should stop being the primary model. They can remain temporarily as a fallback while the migration lands, but the target architecture should render real Hyprland windows, layers, popups, decorations, and frame callbacks through an overview-aware render path.
+The overview should render real Hyprland windows, layer surfaces, popups, decorations, and frame callbacks through Hyprland's compositor paths while Hyprview owns only overview geometry, interaction state, render ordering, and scheduling policy.
 
-The reference project proves that this model is viable. We should not copy it as one monolithic file. We should port the concepts into Hyprview's split architecture and improve the design where the split gives us cleaner ownership.
+This plan replaces the older snapshot migration plan. Future work should optimize and clean up the current live path, not preserve the old cached-image architecture.
 
-## Why this migration is needed
+## Current status
 
-The current snapshot model creates a second visual truth:
+The live rendering path is active.
 
-- Real Hyprland windows and layer surfaces exist in the compositor.
-- Hyprview stores cached framebuffer images for windows and workspaces.
-- Hyprview then tries to keep those images in sync with damage, focus, selection, fullscreen state, pointer state, and workspace movement.
+| Area | Status |
+| --- | --- |
+| Window rendering | Live windows render through overview geometry. |
+| Layer rendering | Wallpaper, background, bottom, top, overlay, and popups are rendered through live layer handling. |
+| Workspace cards | Cards use live geometry records and configurable workspace gaps. |
+| Blur | Background blur uses Hyprland monitor preblur instead of a custom blur pass. |
+| Frame callbacks | Overview-aware callbacks keep visible live surfaces updating. |
+| Hit testing | Pointer hit testing uses live visibility state. |
+| Keyboard selection | Selection skips entries that are not live-renderable. |
+| Drag and drop | Drag/drop behavior still uses older image-era names and should be moved to explicit live geometry naming. |
+| Documentation | README describes the live path, but old internal names still leak into code and plans. |
 
-That duplication is the source of multiple bugs:
+## Architecture model
 
-- Layer surfaces can be visible only when unrelated damage wakes the compositor.
-- Launchers and notification panels need real surface frame callbacks, not just monitor damage.
-- HDR and color behavior can diverge from Hyprland's real render path.
-- Window drag, drop, and resize require fake image previews and reconciliation.
-- Fullscreen behavior needs repeated special cases because the snapshot is not the compositor truth.
-- Dirty image tracking can miss state that is not a normal window damage rectangle.
+Hyprview's live architecture has one source of visual truth: Hyprland surfaces.
 
-Live rendering moves Hyprview back to a single truth:
-
-- Hyprland surfaces stay real.
-- Hyprview computes overview geometry.
-- Hyprview asks Hyprland's renderer to draw those surfaces into overview geometry.
-- Hyprview owns only overview transforms, frame policy, and interaction state.
-
-## Target architecture
-
-The final architecture should split responsibilities like this:
-
-| Area | Target owner | Purpose |
+| Responsibility | Owner | Notes |
 | --- | --- | --- |
-| Hook integration | `src/plugin/PluginHooks.cpp` | Hook Hyprland render, surface damage, frame scheduling, and frame callback paths. |
-| Overview interface | `src/overview/IOverview.hpp` | Expose source-aware surface/frame methods without leaking scroll-specific details. |
-| Render orchestration | `src/overview/scroll/ScrollOverviewLifecycle.cpp` | Add the overview pass and render top-level layers at the right phase. |
-| Live window rendering | New `src/overview/scroll/ScrollOverviewLiveRender.cpp` | Render visible windows, floating windows, dragged windows, decorations, shadows, and blur using live surfaces. |
-| Surface/frame policy | New `src/overview/scroll/ScrollOverviewSurface.cpp` | Decide which surface damage and frame callbacks belong to overview rendering. |
-| Layer handling | New `src/overview/scroll/ScrollOverviewLayers.cpp` | Render background, bottom, top, overlay, and layer popups consistently. |
-| Snapshot compatibility | Existing cache files, then reduced | Keep temporary fallback and remove once live rendering is feature complete. |
-| Geometry model | Existing geometry/layout files | Continue computing overview boxes, hitboxes, workspace tape position, and selection. |
-| Interaction model | Existing interaction files | Keep keyboard, mouse, drag, drop, pan, and resize behavior, but operate on live windows instead of image proxies. |
+| Plugin hook integration | `src/plugin/PluginHooks.cpp` | Hooks render, damage, frame scheduling, and frame callback paths. |
+| Overview interface | `src/overview/IOverview.hpp` | Exposes surface-aware and render-pass entry points. |
+| Overview lifecycle | `src/overview/scroll/ScrollOverviewLifecycle.cpp` | Opens, closes, schedules frames, and injects the overview render pass. |
+| Live render orchestration | `src/overview/scroll/ScrollOverviewRender.cpp` | Routes full render into the live render pipeline. |
+| Live window rendering | `src/overview/scroll/ScrollOverviewLiveRender.cpp` | Renders live window surfaces into overview boxes. |
+| Live layer rendering | `src/overview/scroll/ScrollOverviewLayers.cpp` | Renders workspace and monitor layer surfaces in the correct order. |
+| Surface policy | `src/overview/scroll/ScrollOverviewSurface.cpp` | Classifies surface ownership and decides frame callback behavior. |
+| Live geometry records | `src/overview/scroll/ScrollOverviewCache.cpp` and geometry files | Rebuilds window/workspace records from compositor state. |
+| Interaction | `src/overview/scroll/ScrollOverviewInteraction.cpp` and related files | Uses live geometry for pointer, keyboard, pan, snap, selection, and drag/drop. |
 
-## Core design principles
+## Design principles
 
-- Do not add launcher-specific behavior.
-- Do not add delayed redraws or forced damage loops as fixes.
-- Treat `CWLSurfaceResource` ownership as the source of truth for layer/window/popup behavior.
-- Keep frame callbacks overview-aware so clients keep producing frames while transformed in the overview.
-- Render only visible overview content where possible.
-- Keep Hyprview's modular structure instead of importing the reference as one large file.
-- Prefer explicit owner classification over broad heuristics.
-- Keep snapshot code only as an interim compatibility path.
-- Avoid behavior that depends on accidental compositor wakeups from unrelated damage.
+- No cached window image is a source of truth.
+- No fallback render mode should be added for retired snapshot behavior.
+- Live geometry records should drive rendering, hit testing, selection, drag/drop, and workspace motion.
+- Hyprland's renderer should draw Hyprland surfaces; Hyprview should not invent a compositor pipeline.
+- Hyprland's existing preblur should be used for blur; Hyprview should not blur live content every frame.
+- Frame callbacks should be delivered only to surfaces that are visible or policy-approved in the overview.
+- Render only what intersects the visible overview viewport unless correctness requires otherwise.
+- Fix root causes in lifecycle, ownership, geometry, or render order; do not add launcher-specific or timing-based hacks.
+- Keep scrolling overview behavior local to `src/overview/scroll/` unless the plugin boundary requires otherwise.
+- Keep docs updated with the current behavior after each feature slice.
 
-## Migration phases
+## Completed work
 
-## Phase 0: Stabilize the current branch before migration
+| Phase | Result |
+| --- | --- |
+| Repository split | Hyprview is a scrolling-only plugin separated from the old mixed overview work. |
+| Lua-only config | Non-Lua config and dispatcher paths were removed from the plugin behavior. |
+| Hook hardening | Function hook registration moved to a safer pattern with clearer failure handling. |
+| Keyboard control | Overview-specific keyboard navigation and keyboard takeover behavior are implemented. |
+| Mouse pan and snap | Right-click pan and edge snap behavior are implemented for scrolling workspace cards. |
+| Focus and selection sync | Focus changes can update overview selection, and selection memory is preserved across workspace movement. |
+| Exit animation alignment | Closing the overview syncs to the active/tape state so zoom-out is visually aligned. |
+| Fullscreen handling | Fullscreen state no longer hides the overview itself and scrolling workspaces handle their own fullscreen behavior. |
+| Live windows | Windows render through live surface rendering instead of cached window captures. |
+| Live layers | Workspace layers, monitor layers, popups, and wallpaper/backdrop handling are routed through live rendering. |
+| Hyprland blur | Background blur uses Hyprland's monitor blur path. |
+| Config additions | `scrolling.show_workspace_layers` and `scrolling.workspace_gap` are documented and implemented. |
+| Snapshot removal start | Per-window framebuffer allocation and redraw paths were removed from the current live records path. |
 
-Goal: Make sure the migration starts from a known state and does not mix unrelated fixes.
+## Remaining phases
+
+## Phase A: Rename image-era data structures to live entries
+
+Goal: Make the code describe the current model instead of preserving old mental models.
 
 Work:
 
-- Keep the current P5 layer visibility work separate from the live-render migration.
-- Revert or demote the broad `onDamageReported(const CRegion&)` change if it is no longer needed after surface-aware hooks land.
-- Preserve the fullscreen visibility fix that resets `m_solitaryClient`, unless live rendering makes a cleaner equivalent obvious.
-- Do not change README feature claims until live rendering is actually working.
+- Rename `SWindowEntry` to a live-entry name such as `SWindowEntry` or `SOverviewWindow`.
+- Rename `SWorkspaceEntry` to a live workspace/card name such as `SWorkspaceEntry` or `SOverviewWorkspace`.
+- Rename helpers like `windowEntryForWindow` and `workspaceEntryForWorkspace` to entry/card terminology.
+- Rename state like `draggedEntry` to window-entry or drag-entry terminology.
+- Keep this as a behavior-preserving refactor.
 
 Exit criteria:
 
-- Current code builds.
-- Current behavior baseline is documented.
-- Live-render migration starts in a dedicated branch.
+- No active code path describes live-rendered windows as workspaceEntries.
+- Render, input, and drag/drop still use the same live geometry records.
+- README and plan terminology match the code names.
 
-## Phase 1: Introduce source-aware hook plumbing
+## Phase B: Make drag/drop fully live-geometry based
 
-Goal: Let Hyprview see real surface damage and frame lifecycle events before they collapse into anonymous monitor damage.
+Goal: Remove the last image-era assumptions from drag/drop behavior.
 
-Files:
+Work:
 
-- `src/plugin/PluginHooks.cpp`
-- `src/overview/IOverview.hpp`
-- `src/overview/scroll/ScrollOverview.hpp`
-- New `src/overview/scroll/ScrollOverviewSurface.cpp`
+- Store drag source as a live window entry plus the original Hyprland window.
+- Compute drag preview from live window geometry, not from any texture-like proxy.
+- Keep drop target feedback based on live workspace/card boxes.
+- Ensure dragged floating and tiled windows preserve scale, border, and clipping behavior.
+- Keep drag render ordering explicit: normal cards, normal windows, drop feedback, dragged live window, top/overlay layers.
 
-Hooks to add:
+Exit criteria:
 
-| Hook | Why |
+- Dragging a tiled window between scrolling workspaces uses live content during the drag.
+- Dragging a floating window preserves visible geometry and does not create stale preview state.
+- Drop target feedback does not depend on retired image fields.
+
+## Phase C: Optimize live visibility and render culling
+
+Goal: Keep live rendering efficient without sacrificing correctness.
+
+Work:
+
+- Render only workspace cards that intersect the visible monitor overview region plus a small animation margin.
+- Render only windows whose overview boxes intersect their workspace card clip.
+- Skip hidden, unmapped, or non-renderable windows before entering expensive render helpers.
+- Skip workspace layer rendering when `scrolling.show_workspace_layers = false`.
+- Skip Hyprland preblur when `scrolling.background_blur = false`.
+- Avoid repeated owner classification work inside one frame by caching per-frame classification where safe.
+- Keep labels, text, and static annotations cached independently from live surfaces.
+
+Exit criteria:
+
+- Large scrolling workspaces do not render offscreen live windows every frame.
+- Layer rendering cost disappears when workspace layers are disabled.
+- Animated visible clients update correctly while invisible clients do not force unlimited frames.
+
+## Phase D: Harden surface ownership and frame policy
+
+Goal: Make live surfaces reliable without accidental wakeups or client-specific behavior.
+
+Work:
+
+- Keep one shared classifier for windows, layers, window popups, layer popups, and unknown surfaces.
+- Route damage and frame decisions through the same owner result.
+- Send frame callbacks to visible live windows and visible layer surfaces.
+- Deny or defer frame callbacks for invisible overview entries.
+- Keep realtime preview throttling explicit and documented.
+- Add trace telemetry only where it answers ownership, visibility, or frame-policy questions.
+
+Exit criteria:
+
+- Layers can appear, close, and reopen while Hyprview is active without requiring unrelated damage.
+- Window popups follow their parent window's overview visibility.
+- Layer popups render above the overview when their layer is active.
+- No launcher-specific special cases exist in the frame policy.
+
+## Phase E: Visual correctness and lifecycle polish
+
+Goal: Make the live path match the intended overview interaction model.
+
+Work:
+
+- Verify zoom-in and zoom-out endpoints use the same tape/card/window geometry as the visible overview state.
+- Keep active-window indicators visually distinct from overview selection indicators.
+- Keep focus-change centering and selection-change centering separate unless config explicitly couples them.
+- Keep workspace switch, fullscreen transition, close transition, and overview reopen state consistent.
+- Confirm floating, pinned, tiled, fullscreen, and partially offscreen windows use the same live geometry rules.
+- Confirm wallpaper/backdrop scaling follows card geometry, not monitor-sized texture assumptions.
+
+Exit criteria:
+
+- Closing from a selected-but-not-active window zooms toward the actual active live geometry.
+- Focus keybinds update selection and centering only through the intended policy path.
+- Floating windows render in the correct card position and do not jump on the next frame.
+
+## Phase F: Remove obsolete snapshot-era code and docs
+
+Goal: Finish the architectural cleanup once the live path is stable.
+
+Work:
+
+- Remove unused includes, comments, telemetry, and helper names that only existed for cached workspaceEntries.
+- Remove old plan entries that describe temporary fallback behavior.
+- Update README to describe only live rendering behavior and current quirks.
+- Update examples if config names or defaults changed.
+- Refresh graphify for the Hyprview code scope after code changes.
+
+Exit criteria:
+
+- `rg` finds no active snapshot-era implementation names in `src/overview/scroll/` except historical docs or explicitly retired notes.
+- README, example config, and this plan describe the same behavior.
+- The graph no longer reports removed redraw/cache functions as central live architecture nodes after a scoped refresh.
+
+## Validation matrix
+
+Use this matrix after each phase that touches code.
+
+| Area | Test |
 | --- | --- |
-| `IHyprRenderer::damageSurface` | Needed to classify whether damage belongs to a layer, window, popup, or irrelevant monitor. |
-| `IHyprRenderer::sendFrameEventsToWorkspace` | Needed to suppress normal workspace frame callbacks while overview renders transformed content. |
-| `CWLSurfaceResource::frame` | Needed to decide whether a surface should receive a frame callback now or be scheduled for overview rendering. |
-| `CCompositor::scheduleFrameForMonitor` | Needed to throttle or allow frames for realtime preview without fighting Hyprland's scheduler. |
-| Existing `renderWorkspace` | Keep as the overview render injection point initially. |
-| Existing `CMonitor::addDamage` | Keep temporarily, but it should no longer be the primary surface update mechanism. |
+| Open/close | Open Hyprview and close it from tiled, floating, and scrolling workspaces. |
+| Keyboard navigation | Move selection left, right, up, and down across visible and offscreen scrolling entries. |
+| Focus sync | Move focus with normal Hyprland binds while Hyprview is open and confirm selection/centering policy. |
+| Mouse hit testing | Hover and click live windows, empty card space, and workspace gaps. |
+| Mouse pan | Right-click pan normally inside cards and edge snap only near screen edges. |
+| Drag/drop | Drag tiled and floating windows between workspace cards. |
+| Layers | Open and close notification center, launcher, waybar-like layers, and layer popups. |
+| Backdrop | Toggle workspace layers and blur and confirm wallpaper/card scaling. |
+| Fullscreen | Open overview from fullscreen and enter fullscreen while overview is visible. |
+| Large workspaces | Use many windows on a scrolling workspace and confirm offscreen entries do not disappear or over-render. |
+| Live updates | Play video or animated content while overview is open and confirm visible clients update. |
+| Reload | Unload and reload the plugin after build and confirm the first launch is visible. |
 
-Interface methods to add:
+## Performance targets
 
-```cpp
-virtual bool shouldHandleSurfaceDamage(SP<CWLSurfaceResource> surface);
-virtual bool shouldAllowSurfaceFrame(SP<CWLSurfaceResource> surface, const Time::steady_tp& now);
-virtual bool shouldAllowRealtimePreviewSchedule();
-virtual bool shouldSuppressRenderDamage() const;
-```
-
-Hyprview-specific improvement over the reference:
-
-- Keep hook target discovery through the existing checked demangled matching helper instead of raw first-match lookup.
-- Add narrow failure messages per hook so API drift is diagnosable.
-- Keep hook functions small and delegate policy into overview methods.
-
-Exit criteria:
-
-- Layer surface damage can be classified as layer damage.
-- Window surface damage can be classified as visible overview window damage or ignored offscreen damage.
-- Normal workspace frame callbacks are suppressible while overview is active.
-- The code builds before changing the render model.
-
-## Phase 2: Add surface ownership classification
-
-Goal: Convert `CWLSurfaceResource` into an explicit owner classification.
-
-New concept:
-
-```cpp
-enum class eOverviewSurfaceOwner {
-    UNKNOWN,
-    WINDOW,
-    LAYER,
-    WINDOW_POPUP,
-    LAYER_POPUP,
-};
-
-struct SOverviewSurfaceOwner {
-    eOverviewSurfaceOwner type;
-    PHLWINDOW window;
-    PHLLS layer;
-    PHLMONITOR monitor;
-};
-```
-
-Classification rules:
-
-- Convert `CWLSurfaceResource` to `Desktop::View::CWLSurface`.
-- From the view, detect `Desktop::View::CWindow`.
-- From the view, detect `Desktop::View::CLayerSurface`.
-- If neither exists, detect `Desktop::View::CPopup` and resolve its top-level owner.
-- Treat layer popups as layer-owned.
-- Treat window popups as window-owned.
-- Reject surfaces on monitors not owned by the active overview.
-
-Hyprview-specific improvement over the reference:
-
-- Put this in one helper instead of duplicating owner resolution in both damage and frame paths.
-- Return a typed result instead of repeating loosely coupled checks.
-- Make tests/manual debugging easier by logging owner type in trace mode if needed.
-
-Exit criteria:
-
-- `shouldHandleSurfaceDamage()` and `shouldAllowSurfaceFrame()` share the same classifier.
-- Top/overlay layer popups are treated as blocking layer input and rendered above overview.
-- Window popups are tied to their parent window's overview visibility.
-
-## Phase 3: Port overview-aware frame callback delivery
-
-Goal: Replace normal workspace frame callback delivery with overview-aware delivery while Hyprview is active.
-
-Files:
-
-- `src/overview/scroll/ScrollOverviewSurface.cpp`
-- `src/overview/scroll/ScrollOverviewLifecycle.cpp`
-- `src/overview/scroll/ScrollOverview.hpp`
-
-New methods:
-
-```cpp
-void sendOverviewFrameCallbacks(const Time::steady_tp& now);
-bool surfaceTreeHasFrameCallbacks(SP<CWLSurfaceResource> surface) const;
-void surfaceTreePresent(SP<CWLSurfaceResource> surface, PHLMONITOR monitor, const Time::steady_tp& now);
-bool shouldAllowRealtimePreviewFrame() const;
-void scheduleRealtimePreviewFrame();
-```
-
-Frame callback policy:
-
-- Always allow layer surfaces that are mapped and belong to the overview monitor.
-- Allow visible overview windows.
-- Allow pinned floating windows if they are visible in overview geometry.
-- Deny invisible windows and schedule an overview frame if they need one later.
-- Deny non-active fullscreen-covered tiled windows when the fullscreen window is the only visible overview content for that workspace.
-- Keep realtime preview throttling to prevent animated clients from forcing unlimited frames.
-
-Hyprview-specific improvement over the reference:
-
-- Start with conservative frame delivery for layers and selected/visible windows.
-- Add throttling as an explicit policy object or helper constants instead of scattered static state.
-- Keep the first pass correctness-biased, then optimize after user testing.
-
-Exit criteria:
-
-- Reopening `hyprlauncher` inside Hyprview works repeatedly without `swaync` or workspace switching.
-- Layer clients continue animating or updating while visible.
-- Invisible overview windows do not receive unlimited frame callbacks.
-
-## Phase 4: Create the live render pipeline
-
-Goal: Render live windows and layers into overview geometry instead of drawing cached snapshots.
-
-Files:
-
-- New `src/overview/scroll/ScrollOverviewLiveRender.cpp`
-- New `src/overview/scroll/ScrollOverviewLayers.cpp`
-- `src/overview/scroll/ScrollOverviewRender.cpp`
-- `src/overview/scroll/ScrollOverviewLifecycle.cpp`
-- `src/overview/OverviewPassElement.cpp`
-
-Render order:
-
-| Step | Content |
+| Target | Reason |
 | --- | --- |
-| 1 | Implemented: clear to `backdrop_col`, render live `BACKGROUND` layers, and optionally blur through Hyprland `preBlurForCurrentMonitor` plus monitor `m_blurFB`. |
-| 2 | Implemented: render background layer surfaces inside workspace cards when `scrolling.show_workspace_layers = true`. |
-| 3 | Implemented: workspace shadows, cards, indicators, and annotations render from live overview geometry. |
-| 4 | Implemented: render bottom layer surfaces inside workspace cards when `scrolling.show_workspace_layers = true`. |
-| 5 | Implemented: render live tiled and floating windows into overview boxes. |
-| 6 | Implemented: render overview decorations, borders, active indicators, labels, and drop targets. |
-| 7 | Implemented: render dragged window above normal windows. |
-| 8 | Implemented: render pinned floating windows above workspace cards if applicable. |
-| 9 | Implemented: render top and overlay layer surfaces above the overview. |
-| 10 | Implemented: send overview frame callbacks. |
-
-Live rendering primitives:
-
-```cpp
-void renderOverviewLive(PHLMONITOR monitor, const Time::steady_tp& now);
-void renderWorkspaceLive(PHLMONITOR monitor, const SWorkspaceImage& workspace, const CBox& workspaceBox, float scale, const Time::steady_tp& now);
-void renderWindowLive(PHLMONITOR monitor, PHLWINDOW window, const CBox& overviewBox, float scale, const Time::steady_tp& now);
-void renderLayerLevel(PHLMONITOR monitor, uint32_t layer, const CBox* workspaceBox, float scale, const Time::steady_tp& now);
-```
-
-Important renderer behavior:
-
-- Use Hyprland renderer hints or equivalent transform state to translate and scale real surfaces.
-- Block surface feedback while rendering transformed overview content.
-- Restore renderer state with scope guards.
-- Never leave render modifications active after one window or layer.
-- Use mapped checks before rendering layer surfaces.
-- Keep the render pass element as the injection mechanism initially.
-
-Hyprview-specific improvement over the reference:
-
-- Keep per-area render helpers in separate files.
-- Avoid combining wallpaper, blur, live windows, frame callbacks, and interaction in one large function.
-- Keep render order explicit and documented in code.
-
-Exit criteria:
-
-- Overview can display live windows and configured workspace-card layers without snapshot textures in the live path.
-- Live backdrop uses background layers and Hyprland's monitor blur resource instead of the old captured backdrop texture.
-- Top/overlay layers render above overview.
-- Basic selection, hover, and close animations still work.
-
-Remaining deferred cleanup:
-
-- Keep the old snapshot/background framebuffer path until the full live render migration is complete, then remove it in one scoped cleanup.
-
-## Phase 5: Migrate window geometry from image boxes to live boxes
-
-Goal: Reuse the existing geometry model, but stop treating cached images as the render source.
-
-Current concepts to preserve:
-
-- Workspace ordering.
-- Workspace tape offset.
-- Horizontal content pan.
-- Window hitboxes.
-- Drop target geometry.
-- Selection memory.
-- Active indicator geometry.
-- Keyboard navigation geometry.
-
-Concepts to replace:
-
-- `SWindowImage` should become a geometry/render record, not a cached texture owner.
-- `SWorkspaceImage` should become `SWorkspaceOverview` or equivalent after the migration.
-- `imageForWindow()` can become `overviewWindowForWindow()` or `windowEntryForWindow()`.
-- `redrawWindowImage()` should disappear from the live path.
-
-Suggested transition:
-
-- First keep the current type names to reduce churn.
-- Add fields for live geometry and visibility.
-- Stop using framebuffer texture fields in live render mode.
-- Rename the types only after behavior is stable.
-
-Hyprview-specific improvement over the reference:
-
-- Keep a strong separation between layout data and render implementation.
-- The geometry cache should not know whether the renderer is snapshot or live.
-- Hit testing should use the same live overview boxes that rendering uses.
-
-Exit criteria:
-
-- Keyboard navigation selects the same window that live rendering draws.
-- Mouse hit testing matches live-rendered window positions.
-- Drag and drop targets use live geometry.
-
-## Phase 6: Port live drag, drop, and resize behavior
-
-Goal: Make overview manipulation operate on real windows instead of fake thumbnails.
-
-Behavior to preserve:
-
-- Right-click drag viewport pan.
-- Mouse drag window between workspaces.
-- Drop target feedback.
-- Keyboard selection movement.
-- Keyboard and mouse takeover behavior.
-- Workspace switching through overview.
-
-Behavior to improve:
-
-- Drag preview should render the real window at the dragged overview box.
-- Resize preview should render the real window at the resized overview box.
-- Drop should only commit once the interaction completes.
-- Pointer hitboxes should come from live overview geometry.
-
-Implementation approach:
-
-- Keep current interaction state machine.
-- Replace drag preview snapshot drawing with live `renderDraggedWindow()`.
-- Store temporary overview box for dragged or resized window.
-- Commit real Hyprland move/resize only on release.
-- If Hyprland needs live resize during preview, gate that separately after the first stable pass.
-
-Exit criteria:
-
-- Dragging a window does not show stale thumbnail content.
-- Resizing a window preview does not require recapturing texture images.
-- Dropping between workspaces still updates workspace contents correctly.
-
-## Phase 7: Fullscreen and workspace lifecycle
-
-Goal: Ensure live rendering handles fullscreen windows without compositor state desync.
-
-Current known state:
-
-- Hyprview currently resets `m_solitaryClient` so overview remains visible above fullscreen.
-- Scrolling workspaces own their own fullscreen workspace state.
-- The plugin should not fake scrolling-layout fullscreen internals.
-
-Live model policy:
-
-- Keep overview visible over fullscreen by preventing solitary fullscreen optimization while overview is active.
-- Render fullscreen windows as overview windows where appropriate.
-- If a workspace has a fullscreen tiled window, do not render hidden tiled windows unless floating visibility rules require it.
-- Top/overlay layers should remain visible above fullscreen overview rendering.
-- On close, restore normal Hyprland rendering without leaving hidden or forced-visible state behind.
-
-Hyprview-specific improvement over the reference:
-
-- Keep fullscreen visibility policy in a dedicated helper instead of mixing it into all render paths.
-- Do not force scrolling workspace internals unless Hyprland itself exposes the required state.
-
-Exit criteria:
-
-- Opening overview over fullscreen works.
-- Entering fullscreen while overview is open does not hide the overview.
-- Closing overview restores normal fullscreen behavior.
-
-## Phase 8: Blur, shadows, decorations, and HDR-sensitive rendering
-
-Goal: Preserve Hyprview's visual features while relying on Hyprland's real render path.
-
-Visual features to preserve:
-
-- Window borders.
-- Active window indicator.
-- Selection indicator.
-- Drop target feedback.
-- Workspace card backgrounds.
-- Labels.
-- Drag preview styling.
-
-Visual features to reconsider:
-
-- Cached blur framebuffers.
-- Snapshot-based workspace shadows.
-- Precomputed blur over cached windows.
-
-Live model policy:
-
-- Prefer Hyprland's own decoration and surface render behavior.
-- Keep custom overview indicators as overlay pass elements.
-- Only use precomputed blur if it is tied to overview background, not stale window screenshots.
-- Avoid converting HDR surfaces into SDR snapshot textures.
-
-Hyprview-specific improvement over the reference:
-
-- Make visual effects optional and local to overview composition.
-- Keep correctness first, then tune blur/shadow performance.
-
-Exit criteria:
-
-- Normal windows, HDR windows, and layer surfaces render through the same live path.
-- Overview-specific indicators remain visible and distinguishable.
-- No stale afterimage appears when clients update.
-
-## Phase 9: Demote and remove snapshot cache code
-
-Goal: Delete the old duplicate-rendering model once live rendering reaches parity.
-
-Candidate code to remove or isolate:
-
-- Window image framebuffer capture.
-- Workspace image framebuffer capture.
-- Dirty thumbnail recapture.
-- Damage-region mapping to cached image boxes.
-- Snapshot-specific render pass flushing.
-- Fake drag preview texture drawing.
-
-Safe migration sequence:
-
-- Keep snapshot fallback behind an internal compile-time or config-disabled path for one short phase.
-- Do not expose snapshot mode as a long-term public feature unless there is a clear low-power use case.
-- Remove dead cache fields after live path passes manual testing.
-- Rename remaining data types from image terminology to overview-entry terminology.
-
-Exit criteria:
-
-- No core interaction depends on snapshot textures.
-- Dirty image state is gone from the live path.
-- The source tree names match the live architecture.
-
-## Phase 10: Config and README update
-
-Goal: Update public behavior only after implementation is real.
-
-Config policy:
-
-- Do not add a user-facing `render_mode` until there is a maintained second mode.
-- If snapshot fallback is temporary, keep it internal.
-- Keep existing Lua config semantics stable where possible.
-- Add config only for real user-facing behavior, not migration toggles.
-
-README updates after completion:
-
-- Hyprview renders a live Niri-like scrolling overview.
-- Layer-shell launchers and overlays are supported.
-- Normal Hyprland keybinds continue to work unless keyboard grab overrides them.
-- Drag, drop, resize, selection, and focus behavior use live window state.
-- Snapshot limitations should not be documented as features once removed.
-
-Exit criteria:
-
-- README matches code.
-- Example Lua config remains accurate.
-- No docs claim behavior before it exists.
-
-## Validation plan
-
-Manual validation should happen at the end of each phase, not only at the end of the migration.
-
-Always run before asking for testing:
-
-```sh
-make format-fix && make all && hyprctl plugin unload /home/imperishablesecret/projs/hyprview/hyprview.so && hyprctl plugin load /home/imperishablesecret/projs/hyprview/hyprview.so
-```
-
-Layer validation:
-
-- Open Hyprview.
-- Launch `hyprlauncher`.
-- Press Escape.
-- Launch `hyprlauncher` again without opening any other layer.
-- Repeat several times.
-- Open and close `swaync`.
-- Verify both layer clients remain visible and interactive.
-
-Frame callback validation:
-
-- Use an animated or updating launcher surface if available.
-- Verify animation/update continues while visible in overview.
-- Move the pointer over the layer and verify pointer input reaches the layer when expected.
-
-Window validation:
-
-- Open multiple tiled windows.
-- Open floating windows.
-- Open windows with popups or menus.
-- Verify overview render matches real window state.
-- Verify keyboard selection and mouse selection match visible live geometry.
-
-Interaction validation:
-
-- Drag a window between workspaces.
-- Resize a window in overview if supported.
-- Drop a window and verify workspace contents update.
-- Use keyboard movement while mouse is idle.
-- Use mouse movement after keyboard takeover.
-
-Fullscreen validation:
-
-- Open overview over fullscreen.
-- Enter fullscreen while overview is open.
-- Exit overview from fullscreen.
-- Verify normal Hyprland fullscreen behavior returns.
-
-HDR/color validation:
-
-- Open HDR or color-sensitive content.
-- Compare normal workspace rendering and overview rendering.
-- Verify no obvious SDR snapshot flattening or stale color frame appears.
-
-Exit animation validation:
-
-- Select a non-active window.
-- Exit without activating selection.
-- Verify zoom returns to the active workspace/window state smoothly.
-- Exit with activating selection.
-- Verify target window focus and animation align.
-
-Regression validation:
-
-- Existing Lua dispatcher binds still work.
-- Keyboard grab still works.
-- Non-overridden Hyprland keybinds still work.
-- Gesture open and close still work.
-- Plugin unload does not leave windows hidden or layers invisible.
-
-## Risk assessment
-
-| Risk | Impact | Mitigation |
-| --- | --- | --- |
-| Hyprland internal hook drift | Plugin fails to load after Hyprland updates. | Use checked demangled matching and clear failure notifications. |
-| Live rendering too expensive with many animated windows | Overview can stutter. | Add visible-window filtering and realtime frame throttling. |
-| Surface feedback mishandled | Clients may over-render or under-render. | Block feedback during transformed render and send explicit overview frame callbacks. |
-| Layer popups misclassified | Launcher menus or popups can disappear. | Centralize owner classification and resolve popup top-level owners. |
-| Fullscreen state desync | Overview can disappear or leave windows hidden. | Keep fullscreen policy dedicated and restore state on close/destructor. |
-| Drag/drop behavior regressions | Window movement can commit incorrectly. | Keep current interaction state machine and swap render source first. |
-| Large refactor scope | Hard to debug if all changes land together. | Implement phase by phase with user testing after each major phase. |
-
-## Suggested implementation order
-
-1. Branch: `feature/live-render-overview`.
-2. Add hook plumbing and overview interface methods.
-3. Add centralized surface owner classification.
-4. Port overview-aware frame callback delivery.
-5. Fix launcher relaunch bug through the proper surface/frame path.
-6. Add live rendering for top/overlay layers with mapped checks and feedback blocking.
-7. Add live window rendering while keeping snapshot fallback.
-8. Switch default rendering to live windows.
-9. Port drag/drop/resize preview to live windows.
-10. Migrate fullscreen and visual effects into the live path.
-11. Remove snapshot cache code.
-12. Update README and example config.
-13. Run scoped graph update for changed code paths.
-14. Commit in reviewable chunks, signed, with behavior-specific messages.
-
-## Commit slicing
-
-Recommended commits:
-
-| Commit | Scope |
+| Visible-card culling | Prevent many-window scrolling workspaces from scaling linearly with hidden content. |
+| Visible-window culling | Avoid rendering live surfaces that are clipped out of the card viewport. |
+| Layer config gate | Avoid layer traversal when users disable workspace layer rendering. |
+| Hyprland preblur only | Reuse compositor blur instead of adding per-frame custom blur cost. |
+| Label texture cache | Keep static text cheap without caching live surfaces. |
+| Frame callback throttling | Let visible clients update without letting one animated client force unlimited overview frames. |
+| Scoped damage | Damage the overview monitor/card regions needed for live updates instead of waking unrelated monitors. |
+
+## Suggested commit slicing
+
+| Slice | Scope |
 | --- | --- |
-| `hooks` | Add surface/frame hook plumbing and interface methods. |
-| `surface-policy` | Add owner classification and surface damage policy. |
-| `frame-callbacks` | Add overview-aware frame callback delivery. |
-| `layer-live-render` | Render layers through live path and fix launcher lifecycle. |
-| `window-live-render` | Render visible windows live with snapshot fallback. |
-| `interaction-live-render` | Move drag/drop/resize previews to live windows. |
-| `fullscreen-live-render` | Consolidate fullscreen handling for live overview. |
-| `remove-snapshots` | Delete or isolate snapshot cache code after parity. |
-| `docs` | Update README and example Lua config after behavior is complete. |
+| `rename-live-entries` | Behavior-preserving rename from image terminology to live-entry terminology. |
+| `live-drag-geometry` | Drag/drop state and preview based on live geometry records. |
+| `live-render-culling` | Visible workspace/window/layer culling and frame policy cleanup. |
+| `live-lifecycle-polish` | Focus, close animation, fullscreen, and workspace-switch lifecycle fixes. |
+| `live-docs-cleanup` | README, example config, and plan cleanup after code names settle. |
 
-## Final target
+## Anti-goals
 
-Hyprview should become a live transformed view of Hyprland's compositor state.
-
-The overview should own:
-
-- Workspace tape geometry.
-- Overview transforms.
-- Selection and focus policy.
-- Input overrides.
-- Surface/frame scheduling while overview is active.
-- Overview-only decorations and indicators.
-
-Hyprland should remain the source of truth for:
-
-- Window contents.
-- Layer contents.
-- Popups and subsurfaces.
-- Color and HDR rendering.
-- Surface damage.
-- Frame callback semantics.
-
-That division is cleaner than snapshots and better matches the feature direction of this project.
+- Do not reintroduce cached window framebuffer rendering.
+- Do not add a user-facing config that switches back to the retired model.
+- Do not create a parallel compositor pipeline inside Hyprview.
+- Do not solve live layer or launcher behavior with client-specific hacks.
+- Do not keep image-era names once the rename phase starts.
+- Do not optimize for old thumbnail behavior when it conflicts with live surface correctness.

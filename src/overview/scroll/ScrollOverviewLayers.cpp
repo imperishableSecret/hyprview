@@ -102,9 +102,9 @@ void CScrollOverview::renderBackdropLayerLevel(uint32_t layer, const Time::stead
     flushCurrentRenderPass(MONITOR);
 }
 
-void CScrollOverview::renderWorkspaceLayer(PHLLS layer, const SP<SWorkspaceImage>& workspaceImage, const Time::steady_tp& now) {
+void CScrollOverview::renderWorkspaceLayer(PHLLS layer, const SP<SWorkspaceEntry>& workspaceEntry, const Time::steady_tp& now) {
     const auto MONITOR = pMonitor.lock();
-    if (!MONITOR || !layer || !workspaceImage || workspaceImage->overviewBox.empty())
+    if (!MONITOR || !layer || !workspaceEntry || workspaceEntry->overviewBox.empty())
         return;
 
     if (!Desktop::View::validMapped(layer))
@@ -114,7 +114,7 @@ void CScrollOverview::renderWorkspaceLayer(PHLLS layer, const SP<SWorkspaceImage
     if (LAYER_MONITOR && LAYER_MONITOR != MONITOR)
         return;
 
-    const auto OVERVIEW_BOX = workspaceImage->overviewBox;
+    const auto OVERVIEW_BOX = workspaceEntry->overviewBox;
     if (!overviewBoxIntersectsMonitor(OVERVIEW_BOX))
         return;
 
@@ -138,14 +138,14 @@ void CScrollOverview::renderWorkspaceLayer(PHLLS layer, const SP<SWorkspaceImage
     g_pHyprRenderer->renderLayer(layer, MONITOR, now, false);
 }
 
-void CScrollOverview::renderWorkspaceLayerLevel(const SP<SWorkspaceImage>& workspaceImage, uint32_t layer, const Time::steady_tp& now) {
+void CScrollOverview::renderWorkspaceLayerLevel(const SP<SWorkspaceEntry>& workspaceEntry, uint32_t layer, const Time::steady_tp& now) {
     const auto MONITOR = pMonitor.lock();
     if (!MONITOR || layer >= MONITOR->m_layerSurfaceLayers.size())
         return;
 
     for (const auto& layerRef : MONITOR->m_layerSurfaceLayers[layer]) {
         const auto LAYER = layerRef.lock();
-        renderWorkspaceLayer(LAYER, workspaceImage, now);
+        renderWorkspaceLayer(LAYER, workspaceEntry, now);
     }
 
     flushCurrentRenderPass(MONITOR);

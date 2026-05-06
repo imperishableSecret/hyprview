@@ -8,6 +8,7 @@
 #include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/desktop/Workspace.hpp>
 #include <hyprland/src/desktop/view/Window.hpp>
+#include <hyprland/src/helpers/time/Time.hpp>
 #undef protected
 #undef private
 #include <hyprland/src/config/shared/complex/ComplexDataTypes.hpp>
@@ -105,25 +106,25 @@ void CScrollOverview::renderWorkspaceAnnotations() {
     const auto PAD       = std::max(3.0, sc<double>(FONT_SIZE) * 0.35);
     const auto MARGIN    = std::max(4.0, sc<double>(FONT_SIZE) * 0.45);
 
-    for (const auto& wimg : images) {
-        if (!wimg || !wimg->pWorkspace || wimg->overviewBox.empty())
+    for (const auto& workspaceEntry : workspaceEntries) {
+        if (!workspaceEntry || !workspaceEntry->pWorkspace || workspaceEntry->overviewBox.empty())
             continue;
 
-        const auto TEXT    = workspaceAnnotationText(wimg->pWorkspace);
+        const auto TEXT    = workspaceAnnotationText(workspaceEntry->pWorkspace);
         const auto TEXTURE = labelTexture(TEXT, g_hyprviewConfig.scrolling.workspaceAnnotationColor, FONT_SIZE);
         const auto SIZE    = labelTextureSize(TEXTURE);
         if (!TEXTURE || SIZE.x <= 0.0 || SIZE.y <= 0.0)
             continue;
 
-        CBox              bgBox = {wimg->overviewBox.x + MARGIN, wimg->overviewBox.y + MARGIN, SIZE.x + PAD * 2.0, SIZE.y + PAD * 2.0};
+        CBox              bgBox = {workspaceEntry->overviewBox.x + MARGIN, workspaceEntry->overviewBox.y + MARGIN, SIZE.x + PAD * 2.0, SIZE.y + PAD * 2.0};
 
         const std::string POSITION = g_hyprviewConfig.scrolling.workspaceAnnotationPosition;
         if (POSITION.ends_with("right"))
-            bgBox.x = wimg->overviewBox.x + wimg->overviewBox.w - bgBox.w - MARGIN;
+            bgBox.x = workspaceEntry->overviewBox.x + workspaceEntry->overviewBox.w - bgBox.w - MARGIN;
         if (POSITION.starts_with("bottom"))
-            bgBox.y = wimg->overviewBox.y + wimg->overviewBox.h - bgBox.h - MARGIN;
+            bgBox.y = workspaceEntry->overviewBox.y + workspaceEntry->overviewBox.h - bgBox.h - MARGIN;
 
-        if (bgBox.w > wimg->overviewBox.w || bgBox.h > wimg->overviewBox.h)
+        if (bgBox.w > workspaceEntry->overviewBox.w || bgBox.h > workspaceEntry->overviewBox.h)
             continue;
 
         CBox scaledBg = bgBox;
@@ -167,52 +168,29 @@ void CScrollOverview::renderInsertionMarkers() {
         renderTextureLabel(TEXTURE, LABEL_BOX);
     }
 }
-
-void CScrollOverview::renderWindowImage(SP<SWindowImage> img, const CBox& box, double alpha) {
-    if (!img || !img->pWindow || !img->fb)
-        return;
-
-    CBox texbox = box;
-    texbox.scale(pMonitor->m_scale).round();
-
-    CRegion                                         damage{0, 0, INT16_MAX, INT16_MAX};
-
-    const auto                                      FB_SIZE     = img->fb->m_size;
-    const auto                                      WINDOW_SIZE = img->lastWindowSize * pMonitor->m_scale;
-
-    Render::GL::CHyprOpenGLImpl::STextureRenderData renderData;
-    renderData.damage                      = &damage;
-    renderData.a                           = std::clamp(alpha, 0.0, 1.0) * img->pWindow->m_alpha.value();
-    renderData.allowCustomUV               = true;
-    renderData.primarySurfaceUVTopLeft     = {0, 0};
-    renderData.primarySurfaceUVBottomRight = {std::clamp(WINDOW_SIZE.x / FB_SIZE.x, 0.0, 1.0), std::clamp(WINDOW_SIZE.y / FB_SIZE.y, 0.0, 1.0)};
-
-    g_pHyprOpenGL->renderTextureInternal(img->fb->getTexture(), texbox, renderData);
-}
-
-bool CScrollOverview::windowImageIsSelected(const SP<SWindowImage>& img) const {
-    if (!img || !img->pWindow)
+bool CScrollOverview::windowEntryIsSelected(const SP<SWindowEntry>& entry) const {
+    if (!entry || !entry->pWindow)
         return false;
 
     if (!g_hyprviewConfig.keyboard.enabled)
-        return img->highlight;
+        return entry->highlight;
 
-    return keyboardSelectedWindow && img->pWindow == keyboardSelectedWindow;
+    return keyboardSelectedWindow && entry->pWindow == keyboardSelectedWindow;
 }
 
-bool CScrollOverview::windowImageIsActive(const SP<SWindowImage>& img) const {
-    if (!img || !img->pWindow)
+bool CScrollOverview::windowEntryIsActive(const SP<SWindowEntry>& entry) const {
+    if (!entry || !entry->pWindow)
         return false;
 
     const auto ACTIVE = Desktop::focusState()->window();
-    return ACTIVE && img->pWindow == ACTIVE;
+    return ACTIVE && entry->pWindow == ACTIVE;
 }
 
-void CScrollOverview::renderFocusIndicator(SP<SWindowImage> img) {
-    if (!img || (!img->highlight && !windowImageIsSelected(img)) || img->overviewBox.empty() || !pMonitor)
+void CScrollOverview::renderFocusIndicator(SP<SWindowEntry> entry) {
+    if (!entry || (!entry->highlight && !windowEntryIsSelected(entry)) || entry->overviewBox.empty() || !pMonitor)
         return;
 
-    CBox texbox = img->overviewBox;
+    CBox texbox = entry->overviewBox;
     texbox.scale(pMonitor->m_scale).round();
 
     const std::string INDICATOR = g_hyprviewConfig.scrolling.focusIndicator;
@@ -229,8 +207,8 @@ void CScrollOverview::renderFocusIndicator(SP<SWindowImage> img) {
     g_pHyprOpenGL->renderRect(texbox, CHyprColor{g_hyprviewConfig.scrolling.hoverColor}, Render::GL::CHyprOpenGLImpl::SRectRenderData{.round = 5});
 }
 
-void CScrollOverview::renderActiveWindowIndicator(SP<SWindowImage> img) {
-    if (!windowImageIsActive(img) || img->overviewBox.empty() || !pMonitor)
+void CScrollOverview::renderActiveWindowIndicator(SP<SWindowEntry> entry) {
+    if (!windowEntryIsActive(entry) || entry->overviewBox.empty() || !pMonitor)
         return;
 
     const std::string MODE = g_hyprviewConfig.scrolling.activeIndicator;
@@ -253,30 +231,31 @@ void CScrollOverview::renderActiveWindowIndicator(SP<SWindowImage> img) {
     const double MARGIN    = std::max(3.0, THICKNESS);
 
     if (MODE == "border") {
-        renderSolid({img->overviewBox.x, img->overviewBox.y, img->overviewBox.w, THICKNESS});
-        renderSolid({img->overviewBox.x, img->overviewBox.y + img->overviewBox.h - THICKNESS, img->overviewBox.w, THICKNESS});
-        renderSolid({img->overviewBox.x, img->overviewBox.y, THICKNESS, img->overviewBox.h});
-        renderSolid({img->overviewBox.x + img->overviewBox.w - THICKNESS, img->overviewBox.y, THICKNESS, img->overviewBox.h});
+        renderSolid({entry->overviewBox.x, entry->overviewBox.y, entry->overviewBox.w, THICKNESS});
+        renderSolid({entry->overviewBox.x, entry->overviewBox.y + entry->overviewBox.h - THICKNESS, entry->overviewBox.w, THICKNESS});
+        renderSolid({entry->overviewBox.x, entry->overviewBox.y, THICKNESS, entry->overviewBox.h});
+        renderSolid({entry->overviewBox.x + entry->overviewBox.w - THICKNESS, entry->overviewBox.y, THICKNESS, entry->overviewBox.h});
         return;
     }
 
     if (MODE == "underline") {
-        renderSolid({img->overviewBox.x + MARGIN, img->overviewBox.y + img->overviewBox.h - THICKNESS - MARGIN, img->overviewBox.w - MARGIN * 2.0, THICKNESS}, sc<int>(THICKNESS));
+        renderSolid({entry->overviewBox.x + MARGIN, entry->overviewBox.y + entry->overviewBox.h - THICKNESS - MARGIN, entry->overviewBox.w - MARGIN * 2.0, THICKNESS},
+                    sc<int>(THICKNESS));
         return;
     }
 
     if (MODE == "dot") {
-        const double DOT_SIZE = std::clamp(std::min(img->overviewBox.w, img->overviewBox.h) * 0.08, 6.0, 14.0);
-        CBox         dot      = {img->overviewBox.x + img->overviewBox.w - DOT_SIZE - MARGIN, img->overviewBox.y + MARGIN, DOT_SIZE, DOT_SIZE};
+        const double DOT_SIZE = std::clamp(std::min(entry->overviewBox.w, entry->overviewBox.h) * 0.08, 6.0, 14.0);
+        CBox         dot      = {entry->overviewBox.x + entry->overviewBox.w - DOT_SIZE - MARGIN, entry->overviewBox.y + MARGIN, DOT_SIZE, DOT_SIZE};
         renderSolid(dot, sc<int>(DOT_SIZE));
         return;
     }
 
-    const double LENGTH = std::clamp(std::min(img->overviewBox.w, img->overviewBox.h) * 0.18, 16.0, 42.0);
-    const double X      = img->overviewBox.x + MARGIN;
-    const double Y      = img->overviewBox.y + MARGIN;
-    const double R      = img->overviewBox.x + img->overviewBox.w - MARGIN;
-    const double B      = img->overviewBox.y + img->overviewBox.h - MARGIN;
+    const double LENGTH = std::clamp(std::min(entry->overviewBox.w, entry->overviewBox.h) * 0.18, 16.0, 42.0);
+    const double X      = entry->overviewBox.x + MARGIN;
+    const double Y      = entry->overviewBox.y + MARGIN;
+    const double R      = entry->overviewBox.x + entry->overviewBox.w - MARGIN;
+    const double B      = entry->overviewBox.y + entry->overviewBox.h - MARGIN;
 
     renderSolid({X, Y, LENGTH, THICKNESS});
     renderSolid({X, Y, THICKNESS, LENGTH});
@@ -299,28 +278,11 @@ void CScrollOverview::renderDropTargetFeedback() {
     texbox.scale(pMonitor->m_scale).round();
     g_pHyprOpenGL->renderRect(texbox, CHyprColor{g_hyprviewConfig.scrolling.dropTargetColor}, Render::GL::CHyprOpenGLImpl::SRectRenderData{.round = 8});
 }
-
-void CScrollOverview::renderDragPreview() {
-    if (inputState.mode != ePointerMode::WINDOW_DRAG || !inputState.draggedImage)
-        return;
-
-    const bool VALID_DROP = hasDropTarget();
-    const auto DRAG_BOX   = draggedWindowBox();
-
-    const auto PREVIEW_ALPHA = std::clamp(VALID_DROP ? g_hyprviewConfig.scrolling.dragAlpha : g_hyprviewConfig.scrolling.invalidDragAlpha, 0.0F, 1.0F);
-    renderWindowImage(inputState.draggedImage, DRAG_BOX, PREVIEW_ALPHA);
-
-    CBox texbox = DRAG_BOX;
-    texbox.scale(pMonitor->m_scale).round();
-    g_pHyprOpenGL->renderRect(texbox, VALID_DROP ? CHyprColor{g_hyprviewConfig.scrolling.hoverColor} : CHyprColor{g_hyprviewConfig.scrolling.invalidInsertionMarkerColor},
-                              Render::GL::CHyprOpenGLImpl::SRectRenderData{.round = 5});
-}
-
 CBox CScrollOverview::draggedWindowBox() const {
-    if (inputState.mode != ePointerMode::WINDOW_DRAG || !inputState.draggedImage)
+    if (inputState.mode != ePointerMode::WINDOW_DRAG || !inputState.draggedEntry)
         return {};
 
-    CBox box = inputState.draggedImage->overviewBox;
+    CBox box = inputState.draggedEntry->overviewBox;
     box.x    = inputState.lastPosLocal.x - inputState.dragOffsetLocal.x;
     box.y    = inputState.lastPosLocal.y - inputState.dragOffsetLocal.y;
 
@@ -328,48 +290,7 @@ CBox CScrollOverview::draggedWindowBox() const {
 }
 
 void CScrollOverview::fullRender() {
-
-    rebuildGeometryCache();
-
-    clearCurrentRenderTarget(CHyprColor{g_hyprviewConfig.scrolling.backdropColor});
-
-    CBox texbox = {{}, pMonitor->m_size};
-    texbox.scale(pMonitor->m_scale);
-    texbox.round();
-    CRegion damage{0, 0, INT16_MAX, INT16_MAX};
-    if (backgroundFb)
-        g_pHyprOpenGL->renderTextureInternal(backgroundFb->getTexture(), texbox, {.damage = &damage, .a = 1.0});
-
-    renderWorkspaceShadows();
-
-    // render all views
-    float yoff = -sc<float>(activeWorkspaceImageIndex()) * pMonitor->m_size.y * scale->value();
-    for (const auto& wimg : images) {
-        bool dirty = false;
-
-        for (const auto& img : wimg->windowImages) {
-            if (!img->pWindow) {
-                dirty = true;
-                continue;
-            }
-
-            if (inputState.mode == ePointerMode::WINDOW_DRAG && img == inputState.draggedImage)
-                continue;
-
-            renderWindowImage(img, img->overviewBox);
-            renderFocusIndicator(img);
-            renderActiveWindowIndicator(img);
-        }
-        yoff += pMonitor->m_size.y * scale->value();
-
-        if (dirty)
-            std::erase_if(wimg->windowImages, [](const auto& e) { return !e->pWindow; });
-    }
-
-    renderWorkspaceAnnotations();
-    renderDropTargetFeedback();
-    renderDragPreview();
-    renderInsertionMarkers();
+    renderOverviewLive(Time::steadyNow());
 }
 
 void CScrollOverview::renderWorkspaceShadows() {
@@ -383,11 +304,11 @@ void CScrollOverview::renderWorkspaceShadows() {
     if (SHADOW_COLOR.a <= 0.0)
         return;
 
-    for (const auto& wimg : images) {
-        if (!wimg || wimg->overviewBox.empty())
+    for (const auto& workspaceEntry : workspaceEntries) {
+        if (!workspaceEntry || workspaceEntry->overviewBox.empty())
             continue;
 
-        CBox shadowBox = wimg->overviewBox;
+        CBox shadowBox = workspaceEntry->overviewBox;
         shadowBox.x -= SHADOW_SIZE;
         shadowBox.y -= SHADOW_SIZE;
         shadowBox.w += SHADOW_SIZE * 2.0;
