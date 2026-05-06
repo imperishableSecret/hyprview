@@ -114,9 +114,13 @@ class CScrollOverview : public IOverview {
     };
 
     struct SWindowDragState {
-        PHLWINDOWREF window;
-        CBox         sourceBox;
-        Vector2D     grabOffsetLocal;
+        PHLWINDOWREF    window;
+        PHLWORKSPACEREF originalWorkspace;
+        CBox            sourceBox;
+        CBox            originalGlobalBox;
+        Vector2D        grabOffsetLocal;
+        Vector2D        originalFloatingSize;
+        bool            startedTiled = false;
     };
 
     void                     rebuildWorkspaceEntries(PHLWORKSPACE workspace);
@@ -179,6 +183,11 @@ class CScrollOverview : public IOverview {
     bool                     finishWindowDrag();
     void                     cancelPointerInteraction(bool damageOnChange = true);
     bool                     hasDropTarget() const;
+    SP<SWindowEntry>         dropAnchorEntry(const SP<SWorkspaceEntry>& workspace, PHLWINDOW ignoredWindow, CBox* anchorBox = nullptr) const;
+    Vector2D                 overviewPointToGlobal(const SP<SWorkspaceEntry>& workspace, const Vector2D& local) const;
+    CBox                     floatingDropGlobalBox(PHLWINDOW window, PHLWORKSPACE targetWorkspace, const SP<SWorkspaceEntry>& targetEntry) const;
+    bool                     commitFloatingWindowDrop(PHLWINDOW window, PHLWORKSPACE targetWorkspace, const SP<SWorkspaceEntry>& targetEntry);
+    bool                     commitTiledWindowDrop(PHLWINDOW window, PHLWORKSPACE targetWorkspace, const SP<SWorkspaceEntry>& targetEntry);
     bool                     workspaceHasDisplayableWindows(PHLWORKSPACE workspace) const;
     bool                     workspaceVisibleInOverview(PHLWORKSPACE workspace) const;
     bool                     windowBelongsToWorkspaceInOverview(PHLWINDOW window, PHLWORKSPACE workspace) const;

@@ -12,7 +12,7 @@ Hyprview is a Hyprland plugin that adds a niri-like scrolling workspace overview
 | Live geometry records | Tracks per-window overview boxes, renderability, and visibility for rendering, hit testing, and keyboard selection. |
 | Window selection | Clicking a window closes the overview, switches to its workspace if needed, focuses the window, and warps the cursor to it. |
 | Workspace selection | Clicking a workspace closes the overview and switches to that workspace. |
-| Window dragging | Left-drag a non-pinned window inside the overview and drop it on another workspace. |
+| Window dragging | Left-drag a non-pinned window inside the overview. Floating windows land at the dropped card position; tiled windows commit through the target workspace layout. |
 | Workspace insertion markers | Drop a dragged window on a numbered insertion marker to create or select that workspace ID and move the window there. |
 | Horizontal content pan | Right-drag a workspace using Hyprland's `scrolling` tiled layout to pan tiled window entries horizontally. |
 | Wheel navigation | Wheel input moves between overview workspaces by default. It can be configured to zoom instead. |
@@ -268,7 +268,7 @@ Insertion targets respect monitor-bound workspace rules. Existing target workspa
 | --- | --- |
 | Left click | Select the hovered window or workspace and close the overview. |
 | Left drag a window | Drag that window inside the overview. Pinned windows cannot be dragged across workspaces. |
-| Release dragged window over a workspace | Move the window to that workspace, activate that workspace without stealing focus from the dragged window, focus the dragged window, and refresh the overview. |
+| Release dragged window over a workspace | Floating windows move to the dropped card position. Tiled windows move or reorder through the target workspace layout. The target workspace is activated without stealing focus from the dragged window, the dragged window is focused, and the overview refreshes. |
 | Release dragged window over a numbered insertion marker | Create or select that workspace ID, move the window there, focus it, and refresh the overview. |
 | Right drag | Pan tiled entries inside the hovered scrolling-layout workspace horizontally. |
 | Mouse wheel with `scroll_moves_up_down = true` | Move the overview up/down by workspace. Wheel steps move one workspace; smooth vertical scrolling accumulates until the threshold is reached. Horizontal scroll axes are ignored. |
