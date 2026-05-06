@@ -305,8 +305,9 @@ void CScrollOverview::close(bool switchToSelection) {
     rebuildGeometryCache();
 
     const auto FINAL_WORKSPACE = TARGET_WORKSPACE ? TARGET_WORKSPACE : pMonitor->m_activeWorkspace;
-    if (const auto WORKSPACE_IMAGE = imageForWorkspace(FINAL_WORKSPACE))
+    if (const auto WORKSPACE_IMAGE = imageForWorkspace(FINAL_WORKSPACE)) {
         setHorizontalPanForWorkspace(WORKSPACE_IMAGE, 0.0, true);
+    }
 
     *viewOffset = Vector2D{};
 

@@ -373,11 +373,13 @@ void CScrollOverview::fullRender() {
 }
 
 void CScrollOverview::renderWorkspaceShadows() {
-    const auto SHADOW_SIZE = std::max(0, g_hyprviewConfig.scrolling.workspaceShadowSize);
+    const auto STYLE_PROGRESS = overviewStyleProgress();
+    const auto SHADOW_SIZE    = std::max(0.0, sc<double>(g_hyprviewConfig.scrolling.workspaceShadowSize) * STYLE_PROGRESS);
     if (SHADOW_SIZE == 0)
         return;
 
-    const auto SHADOW_COLOR = CHyprColor{g_hyprviewConfig.scrolling.workspaceShadowColor};
+    auto SHADOW_COLOR = CHyprColor{g_hyprviewConfig.scrolling.workspaceShadowColor};
+    SHADOW_COLOR.a *= STYLE_PROGRESS;
     if (SHADOW_COLOR.a <= 0.0)
         return;
 

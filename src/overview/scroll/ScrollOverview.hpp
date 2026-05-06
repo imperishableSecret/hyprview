@@ -198,6 +198,7 @@ class CScrollOverview : public IOverview {
     bool                     overviewWindowOccludedByFullscreen(PHLWINDOW window) const;
     PHLWINDOW                overviewWindowToRender(PHLWINDOW window) const;
     SP<SWindowImage>         imageForRenderedWindow(PHLWINDOW window) const;
+    double                   overviewStyleProgress() const;
     bool                     surfaceTreeHasFrameCallbacks(SP<CWLSurfaceResource> surface) const;
     void                     surfaceTreePresent(SP<CWLSurfaceResource> surface, PHLMONITOR monitor, const Time::steady_tp& now);
     void                     sendOverviewFrameCallbacks(const Time::steady_tp& now);

@@ -34,7 +34,7 @@ void CScrollOverview::rebuildGeometryCache() {
         return;
 
     const auto VIEWPORT_CENTER = CBox{{}, pMonitor->m_size}.middle();
-    const auto WINDOW_GAP      = std::max(0.0, static_cast<double>(g_hyprviewConfig.scrolling.windowGap)) / 2.0;
+    const auto WINDOW_GAP      = (std::max(0.0, static_cast<double>(g_hyprviewConfig.scrolling.windowGap)) / 2.0) * overviewStyleProgress();
     float      yoff            = -sc<float>(activeWorkspaceImageIndex()) * pMonitor->m_size.y * scale->value();
 
     for (const auto& wimg : images) {
@@ -53,9 +53,13 @@ void CScrollOverview::rebuildGeometryCache() {
                 continue;
 
             const auto WINDOW_PAN = img->pWindow->m_isFloating ? 0.0 : CONTENT_PAN_X;
-            img->overviewBox      = CBox{img->pWindow->m_realPosition->value() - pMonitor->m_position - Vector2D{WINDOW_PAN, 0.0}, img->pWindow->m_realSize->value()};
-            img->overviewBox.translate(-VIEWPORT_CENTER).scale(scale->value()).translate(VIEWPORT_CENTER).translate(-viewOffset->value() * scale->value());
-            img->overviewBox.translate({0.F, yoff});
+            const CBox BASE_BOX   = {img->pWindow->m_realPosition->value() - pMonitor->m_position, img->pWindow->m_realSize->value()};
+
+            CBox       rawOverviewBox = CBox{BASE_BOX.pos() - Vector2D{WINDOW_PAN, 0.0}, BASE_BOX.size()};
+            rawOverviewBox.translate(-VIEWPORT_CENTER).scale(scale->value()).translate(VIEWPORT_CENTER).translate(-viewOffset->value() * scale->value());
+            rawOverviewBox.translate({0.F, yoff});
+
+            img->overviewBox = rawOverviewBox;
             img->overviewBox = shrinkBox(img->overviewBox, WINDOW_GAP);
 
             wimg->hitBox = boxUnion(wimg->hitBox, img->overviewBox);
@@ -65,6 +69,18 @@ void CScrollOverview::rebuildGeometryCache() {
     }
 
     buildInsertionMarkers();
+}
+
+double CScrollOverview::overviewStyleProgress() const {
+    if (!scale)
+        return 1.0;
+
+    const double DEFAULT_ZOOM = std::clamp(sc<double>(g_hyprviewConfig.scrolling.defaultZoom), 0.1, 0.9);
+    const double RANGE        = 1.0 - DEFAULT_ZOOM;
+    if (RANGE <= 0.0)
+        return 1.0;
+
+    return std::clamp((1.0 - sc<double>(scale->value())) / RANGE, 0.0, 1.0);
 }
 
 SP<CScrollOverview::SWorkspaceImage> CScrollOverview::workspaceAt(const Vector2D& local) {
