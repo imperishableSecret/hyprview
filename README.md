@@ -354,7 +354,7 @@ The live backdrop clears to `backdrop_col`, renders `BACKGROUND` layer-shell sur
 
 When `show_workspace_layers = true`, `BACKGROUND` and `BOTTOM` layer-shell surfaces are also rendered inside each workspace card before window content. `TOP` and `OVERLAY` layers, layer popups, IME popups, and drag icons render above the overview in the native layer phase.
 
-The older snapshot/background framebuffer path still exists for the remaining migration work and will be removed once the live render migration is complete.
+The overview now uses live window and layer rendering. Remaining migration work is cleanup, naming, culling, lifecycle hardening, and performance optimization, not snapshot fallback.
 
 ## Known quirks
 

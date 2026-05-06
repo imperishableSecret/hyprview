@@ -113,6 +113,12 @@ class CScrollOverview : public IOverview {
         std::string label;
     };
 
+    struct SWindowDragState {
+        PHLWINDOWREF window;
+        CBox         sourceBox;
+        Vector2D     grabOffsetLocal;
+    };
+
     void                     rebuildWorkspaceEntries(PHLWORKSPACE workspace);
     void                     rebuildAllWorkspaceEntries();
     void                     refreshWorkspaceEntries(PHLWORKSPACE preferredViewport = nullptr, bool warpViewport = true);
@@ -231,7 +237,7 @@ class CScrollOverview : public IOverview {
     bool                     windowEntryIsSelected(const SP<SWindowEntry>& entry) const;
     bool                     windowEntryIsActive(const SP<SWindowEntry>& entry) const;
     void                     renderDropTargetFeedback();
-    CBox                     draggedWindowBox() const;
+    CBox                     draggedLiveWindowBox() const;
     bool                     windowLiveRenderable(PHLWINDOW window) const;
 
     size_t                   activeWorkspaceEntryIndex() const;
@@ -259,16 +265,14 @@ class CScrollOverview : public IOverview {
     };
 
     struct SInputState {
-        ePointerMode        mode = ePointerMode::IDLE;
-        Vector2D            pressPosLocal;
-        Vector2D            lastPosLocal;
-        Vector2D            dragOffsetLocal;
-        SP<SWorkspaceEntry> pannedWorkspace;
-        double              contentPanOnPress = 0.0;
-        PHLWINDOWREF        draggedWindow;
-        SP<SWindowEntry>    draggedEntry;
-        SDropTarget         dropTarget;
-        uint32_t            pressedButton = 0;
+        ePointerMode                    mode = ePointerMode::IDLE;
+        Vector2D                        pressPosLocal;
+        Vector2D                        lastPosLocal;
+        SP<SWorkspaceEntry>             pannedWorkspace;
+        double                          contentPanOnPress = 0.0;
+        std::optional<SWindowDragState> windowDrag;
+        SDropTarget                     dropTarget;
+        uint32_t                        pressedButton = 0;
     };
 
     SDropTarget                                           dropTargetAt(const Vector2D& local);

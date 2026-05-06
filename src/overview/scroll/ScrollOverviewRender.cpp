@@ -278,13 +278,16 @@ void CScrollOverview::renderDropTargetFeedback() {
     texbox.scale(pMonitor->m_scale).round();
     g_pHyprOpenGL->renderRect(texbox, CHyprColor{g_hyprviewConfig.scrolling.dropTargetColor}, Render::GL::CHyprOpenGLImpl::SRectRenderData{.round = 8});
 }
-CBox CScrollOverview::draggedWindowBox() const {
-    if (inputState.mode != ePointerMode::WINDOW_DRAG || !inputState.draggedEntry)
+CBox CScrollOverview::draggedLiveWindowBox() const {
+    if (inputState.mode != ePointerMode::WINDOW_DRAG || !inputState.windowDrag)
         return {};
 
-    CBox box = inputState.draggedEntry->overviewBox;
-    box.x    = inputState.lastPosLocal.x - inputState.dragOffsetLocal.x;
-    box.y    = inputState.lastPosLocal.y - inputState.dragOffsetLocal.y;
+    CBox box = inputState.windowDrag->sourceBox;
+    if (const auto ENTRY = renderedWindowEntryForWindow(inputState.windowDrag->window.lock()); ENTRY && !ENTRY->overviewBox.empty())
+        box = ENTRY->overviewBox;
+
+    box.x = inputState.lastPosLocal.x - inputState.windowDrag->grabOffsetLocal.x;
+    box.y = inputState.lastPosLocal.y - inputState.windowDrag->grabOffsetLocal.y;
 
     return box;
 }

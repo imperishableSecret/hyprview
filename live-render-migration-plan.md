@@ -21,7 +21,7 @@ The live rendering path is active.
 | Frame callbacks | Overview-aware callbacks keep visible live surfaces updating. |
 | Hit testing | Pointer hit testing uses live visibility state. |
 | Keyboard selection | Selection skips entries that are not live-renderable. |
-| Drag and drop | Drag/drop behavior still uses older image-era names and should be moved to explicit live geometry naming. |
+| Drag and drop | Drag state stores the dragged Hyprland window plus live source geometry, and drag previews render live window content. |
 | Documentation | README describes the live path, but old internal names still leak into code and plans. |
 
 ## Architecture model
@@ -70,10 +70,13 @@ Hyprview's live architecture has one source of visual truth: Hyprland surfaces.
 | Hyprland blur | Background blur uses Hyprland's monitor blur path. |
 | Config additions | `scrolling.show_workspace_layers` and `scrolling.workspace_gap` are documented and implemented. |
 | Snapshot removal start | Per-window framebuffer allocation and redraw paths were removed from the current live records path. |
+| Live drag geometry | Drag/drop now stores explicit live drag state and renders dragged previews from live window geometry. |
 
-## Remaining phases
+## Phase details
 
 ## Phase A: Rename image-era data structures to live entries
+
+Status: Implemented.
 
 Goal: Make the code describe the current model instead of preserving old mental models.
 
@@ -82,7 +85,7 @@ Work:
 - Rename `SWindowEntry` to a live-entry name such as `SWindowEntry` or `SOverviewWindow`.
 - Rename `SWorkspaceEntry` to a live workspace/card name such as `SWorkspaceEntry` or `SOverviewWorkspace`.
 - Rename helpers like `windowEntryForWindow` and `workspaceEntryForWorkspace` to entry/card terminology.
-- Rename state like `draggedEntry` to window-entry or drag-entry terminology.
+- Renamed drag state away from durable entry pointers into explicit live drag state.
 - Keep this as a behavior-preserving refactor.
 
 Exit criteria:
@@ -93,12 +96,14 @@ Exit criteria:
 
 ## Phase B: Make drag/drop fully live-geometry based
 
-Goal: Remove the last image-era assumptions from drag/drop behavior.
+Status: Implemented.
+
+Goal: Keep drag/drop state tied to live Hyprland windows and explicit overview geometry.
 
 Work:
 
-- Store drag source as a live window entry plus the original Hyprland window.
-- Compute drag preview from live window geometry, not from any texture-like proxy.
+- Store drag source as `SWindowDragState` with the dragged Hyprland window, source overview box, and grab offset.
+- Compute drag preview from current live entry geometry, falling back only to the stored source geometry from the same live drag state.
 - Keep drop target feedback based on live workspace/card boxes.
 - Ensure dragged floating and tiled windows preserve scale, border, and clipping behavior.
 - Keep drag render ordering explicit: normal cards, normal windows, drop feedback, dragged live window, top/overlay layers.

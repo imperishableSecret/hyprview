@@ -121,7 +121,7 @@ void CScrollOverview::handlePointerMotion(const Vector2D& local) {
     }
 
     if (inputState.mode == ePointerMode::PRESS_PENDING) {
-        if (!inputState.draggedEntry || !inputState.draggedWindow) {
+        if (!inputState.windowDrag || !inputState.windowDrag->window) {
             if (inputState.pressPosLocal.distance(local) >= DRAG_THRESHOLD)
                 cancelPointerInteraction();
             return;
@@ -162,17 +162,18 @@ void CScrollOverview::handlePointerPress(uint32_t button) {
         return;
     }
 
-    inputState.mode          = ePointerMode::PRESS_PENDING;
-    inputState.draggedEntry  = windowAt(lastMousePosLocal);
-    inputState.draggedWindow = inputState.draggedEntry && inputState.draggedEntry->pWindow ? inputState.draggedEntry->pWindow : PHLWINDOWREF{};
+    inputState.mode        = ePointerMode::PRESS_PENDING;
+    const auto DRAG_ENTRY  = windowAt(lastMousePosLocal);
+    const auto DRAG_WINDOW = DRAG_ENTRY ? windowForEntry(DRAG_ENTRY) : PHLWINDOW{};
 
-    if (!windowCanDragAcrossWorkspaces(inputState.draggedWindow.lock())) {
-        inputState.draggedEntry.reset();
-        inputState.draggedWindow.reset();
+    if (!windowCanDragAcrossWorkspaces(DRAG_WINDOW)) {
+        inputState.windowDrag.reset();
+        return;
     }
 
-    if (inputState.draggedEntry)
-        inputState.dragOffsetLocal = lastMousePosLocal - inputState.draggedEntry->overviewBox.pos();
+    inputState.windowDrag = SWindowDragState{.window          = DRAG_WINDOW,
+                                             .sourceBox       = DRAG_ENTRY ? DRAG_ENTRY->overviewBox : CBox{},
+                                             .grabOffsetLocal = DRAG_ENTRY ? lastMousePosLocal - DRAG_ENTRY->overviewBox.pos() : Vector2D{}};
 }
 
 void CScrollOverview::handlePointerRelease(uint32_t button) {
@@ -227,12 +228,13 @@ void CScrollOverview::handlePointerAxis(IPointer::SAxisEvent event) {
 }
 
 void CScrollOverview::beginWindowDrag() {
-    if (!inputState.draggedEntry || !windowCanDragAcrossWorkspaces(inputState.draggedWindow.lock())) {
+    const auto DRAG_WINDOW = inputState.windowDrag ? inputState.windowDrag->window.lock() : PHLWINDOW{};
+    if (!inputState.windowDrag || !windowCanDragAcrossWorkspaces(DRAG_WINDOW)) {
         cancelPointerInteraction();
         return;
     }
 
-    raiseFloatingWindow(inputState.draggedWindow.lock());
+    raiseFloatingWindow(DRAG_WINDOW);
 
     inputState.mode = ePointerMode::WINDOW_DRAG;
     updateWindowDrag(inputState.lastPosLocal);
@@ -241,6 +243,12 @@ void CScrollOverview::beginWindowDrag() {
 void CScrollOverview::updateWindowDrag(const Vector2D& local) {
     inputState.lastPosLocal = local;
     rebuildGeometryCache();
+
+    if (inputState.windowDrag) {
+        if (const auto ENTRY = renderedWindowEntryForWindow(inputState.windowDrag->window.lock()); ENTRY && !ENTRY->overviewBox.empty())
+            inputState.windowDrag->sourceBox = ENTRY->overviewBox;
+    }
+
     inputState.dropTarget = dropTargetAt(local);
     damage();
 }
@@ -544,7 +552,7 @@ bool CScrollOverview::moveDraggedWindowToDropTarget() {
         return false;
 
     const auto DROP_TARGET      = inputState.dropTarget;
-    const auto WINDOW           = inputState.draggedWindow.lock();
+    const auto WINDOW           = inputState.windowDrag ? inputState.windowDrag->window.lock() : PHLWINDOW{};
     const auto TARGET_WORKSPACE = workspaceForDropTarget(DROP_TARGET);
     if (!windowCanDragAcrossWorkspaces(WINDOW) || !TARGET_WORKSPACE)
         return false;

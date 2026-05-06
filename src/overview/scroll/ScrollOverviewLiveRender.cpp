@@ -415,7 +415,7 @@ void CScrollOverview::renderWorkspaceLive(const SP<SWorkspaceEntry>& workspaceEn
     }
 
     std::vector<PHLWINDOW> renderedWindows;
-    const auto             DRAGGED_WINDOW   = overviewWindowToRender(inputState.draggedWindow.lock());
+    const auto             DRAGGED_WINDOW   = overviewWindowToRender((inputState.windowDrag ? inputState.windowDrag->window.lock() : PHLWINDOW{}));
     size_t                 submittedWindows = 0;
     size_t                 skippedState     = 0;
     size_t                 skippedCull      = 0;
@@ -506,14 +506,14 @@ void CScrollOverview::renderWorkspaceLive(const SP<SWorkspaceEntry>& workspaceEn
 }
 
 void CScrollOverview::renderDraggedWindowLive(const Time::steady_tp& now) {
-    if (inputState.mode != ePointerMode::WINDOW_DRAG || !inputState.draggedEntry)
+    if (inputState.mode != ePointerMode::WINDOW_DRAG || !inputState.windowDrag)
         return;
 
-    const auto WINDOW = overviewWindowToRender(inputState.draggedWindow.lock() ? inputState.draggedWindow.lock() : inputState.draggedEntry->pWindow.lock());
+    const auto WINDOW = overviewWindowToRender(inputState.windowDrag->window.lock());
     if (!WINDOW)
         return;
 
-    const auto DRAG_BOX   = draggedWindowBox();
+    const auto DRAG_BOX   = draggedLiveWindowBox();
     const bool VALID_DROP = hasDropTarget();
     const auto ALPHA      = std::clamp(VALID_DROP ? g_hyprviewConfig.scrolling.dragAlpha : g_hyprviewConfig.scrolling.invalidDragAlpha, 0.0F, 1.0F);
 
@@ -531,7 +531,7 @@ void CScrollOverview::renderPinnedFloatingWindowsLive(const Time::steady_tp& now
         return;
 
     std::vector<PHLWINDOW> renderedWindows;
-    const auto             DRAGGED_WINDOW = overviewWindowToRender(inputState.draggedWindow.lock());
+    const auto             DRAGGED_WINDOW = overviewWindowToRender((inputState.windowDrag ? inputState.windowDrag->window.lock() : PHLWINDOW{}));
 
     for (const auto& candidate : g_pCompositor->m_windows) {
         const auto WINDOW = overviewWindowToRender(candidate);
@@ -588,7 +588,7 @@ void CScrollOverview::renderOverviewLive(const Time::steady_tp& now) {
         for (const auto& workspaceEntry : workspaceEntries)
             renderWorkspaceLive(workspaceEntry, now);
 
-        const auto DRAGGED_WINDOW = overviewWindowToRender(inputState.draggedWindow.lock());
+        const auto DRAGGED_WINDOW = overviewWindowToRender((inputState.windowDrag ? inputState.windowDrag->window.lock() : PHLWINDOW{}));
         for (const auto& workspaceEntry : workspaceEntries) {
             if (!workspaceEntry)
                 continue;
