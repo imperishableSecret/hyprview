@@ -59,6 +59,11 @@ static Vector2D hyprlerp(const Vector2D& from, const Vector2D& to, const float p
     return Vector2D{hyprlerp(from.x, to.x, perc), hyprlerp(from.y, to.y, perc)};
 }
 
+static bool focusReasonShouldSyncSelection(Desktop::eFocusReason reason) {
+    return Desktop::isHardInputFocusReason(reason) || reason == Desktop::FOCUS_REASON_SWITCH_TO_WINDOW_SOFT || reason == Desktop::FOCUS_REASON_DISPATCH_FOCUSWINDOW ||
+        reason == Desktop::FOCUS_REASON_GROUP_CURRENT_WINDOW_CHANGE || reason == Desktop::FOCUS_REASON_DISPATCH_MOVEWINDOWINTOGROUP;
+}
+
 CScrollOverview::~CScrollOverview() {
     g_pHyprOpenGL->makeEGLCurrent();
     if (realtimePreviewTimer) {
@@ -177,7 +182,7 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
         if (closing || !pMonitor || inputState.mode != ePointerMode::IDLE || !window || !window->m_workspace || window->m_workspace->m_monitor != pMonitor)
             return;
 
-        if (reason != Desktop::FOCUS_REASON_KEYBIND)
+        if (!focusReasonShouldSyncSelection(reason))
             return;
 
         rebuildGeometryCache();
@@ -197,17 +202,6 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
             focusWorkspaceInViewport(WORKSPACE, false, false);
             rebuildGeometryCache();
         }
-
-        if (const auto RESTORED = restoredSelectionWorkspace.lock(); RESTORED && RESTORED == window->m_workspace) {
-            const auto SELECTED = keyboardSelectedWindow.lock();
-            if (SELECTED && SELECTED != window && SELECTED->m_workspace == window->m_workspace) {
-                restoredSelectionWorkspace.reset();
-                damage();
-                return;
-            }
-        }
-
-        restoredSelectionWorkspace.reset();
 
         if (const auto ENTRY = windowEntryForWindow(window))
             setKeyboardSelection(ENTRY, true, false);
@@ -270,7 +264,6 @@ void CScrollOverview::close(bool switchToSelection) {
 
     cancelPointerInteraction(false);
     pendingAnchorWorkspace.reset();
-    restoredSelectionWorkspace.reset();
     clearFocusedWindowCursorSync();
     releaseKeyboardTakeoverMouse(false);
     viewOffset->setCallbackOnEnd(nullptr);

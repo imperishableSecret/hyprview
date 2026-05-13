@@ -315,7 +315,6 @@ class CScrollOverview : public IOverview {
     PHLWORKSPACEREF                                       hoveredWorkspace;
     PHLWORKSPACEREF                                       pendingAnchorWorkspace;
     PHLWORKSPACEREF                                       mouseSnapPanWorkspace;
-    PHLWORKSPACEREF                                       restoredSelectionWorkspace;
 
     std::vector<SP<SWorkspaceEntry>>                      workspaceEntries;
     SP<SWorkspaceEntry>                                   workspaceEntryForWorkspace(PHLWORKSPACE w);

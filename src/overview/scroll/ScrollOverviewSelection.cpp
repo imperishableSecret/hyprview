@@ -215,7 +215,6 @@ void CScrollOverview::syncSelectionToViewport(bool damageOnChange) {
     if (!g_hyprviewConfig.keyboard.enabled) {
         setKeyboardSelection(nullptr, false, damageOnChange);
         rememberedSelection.clear();
-        restoredSelectionWorkspace.reset();
         return;
     }
 
@@ -223,7 +222,6 @@ void CScrollOverview::syncSelectionToViewport(bool damageOnChange) {
 
     if (workspaceEntries.empty() || viewportCurrentWorkspace >= workspaceEntries.size()) {
         setKeyboardSelection(nullptr, false, damageOnChange);
-        restoredSelectionWorkspace.reset();
         return;
     }
 
@@ -231,12 +229,10 @@ void CScrollOverview::syncSelectionToViewport(bool damageOnChange) {
     setKeyboardSelection(selectableEntryForWorkspace(workspaceEntries[viewportCurrentWorkspace]), keyboardSelectionLocked, damageOnChange);
 
     const auto NEW_SELECTION = keyboardSelectedWindow.lock();
-    if (OLD_SELECTION != NEW_SELECTION && NEW_SELECTION && NEW_SELECTION->m_workspace)
-        restoredSelectionWorkspace = NEW_SELECTION->m_workspace;
 
-    Hyprview::telemetryLog(std::format("event=selection-sync-end viewportIndex={} viewportWorkspace={} old={} new={} restoredWorkspace={}", viewportCurrentWorkspace,
+    Hyprview::telemetryLog(std::format("event=selection-sync-end viewportIndex={} viewportWorkspace={} old={} new={}", viewportCurrentWorkspace,
                                        workspaceID(workspaceEntries[viewportCurrentWorkspace] ? workspaceEntries[viewportCurrentWorkspace]->pWorkspace : PHLWORKSPACE{}),
-                                       windowID(OLD_SELECTION), windowID(NEW_SELECTION), workspaceID(restoredSelectionWorkspace.lock())));
+                                       windowID(OLD_SELECTION), windowID(NEW_SELECTION)));
 }
 
 bool CScrollOverview::moveHorizontalSelection(bool right) {
