@@ -33,6 +33,8 @@ void CScrollOverview::rebuildGeometryCache() {
     if (!pMonitor)
         return;
 
+    invalidateWindowEntryLookups();
+
     const auto VIEWPORT_CENTER = CBox{{}, pMonitor->m_size}.middle();
     const auto WINDOW_GAP      = (std::max(0.0, static_cast<double>(g_hyprviewConfig.scrolling.windowGap)) / 2.0) * overviewStyleProgress();
     const auto WORKSPACE_STEP  = workspaceOverviewStep() * scale->value();
@@ -192,15 +194,8 @@ SP<CScrollOverview::SWindowEntry> CScrollOverview::windowEntryForWindow(PHLWINDO
     if (!w)
         return nullptr;
 
-    for (const auto& workspaceEntry : workspaceEntries) {
-        if (!workspaceEntry)
-            continue;
+    rebuildWindowEntryLookups();
 
-        for (const auto& entry : workspaceEntry->windowEntries) {
-            if (entry && entry->pWindow == w)
-                return entry;
-        }
-    }
-
-    return nullptr;
+    const auto IT = rawWindowEntryLookup.find(w.get());
+    return IT == rawWindowEntryLookup.end() ? nullptr : IT->second;
 }

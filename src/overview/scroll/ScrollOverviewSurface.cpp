@@ -164,6 +164,9 @@ bool CScrollOverview::shouldHandleSurfaceDamage(SP<CWLSurfaceResource> surface) 
     };
 
     auto logDecision = [&](bool allow, std::string_view reason) {
+        if (!Hyprview::telemetryEnabled())
+            return;
+
         const auto WINDOW        = overviewWindowToRender(OWNER.window);
         const auto ENTRY         = renderedWindowEntryForWindow(WINDOW);
         const auto LAYER_MONITOR = OWNER.layer ? OWNER.layer->m_monitor.lock() : PHLMONITOR{};
@@ -247,6 +250,9 @@ bool CScrollOverview::shouldAllowSurfaceFrame(SP<CWLSurfaceResource> surface, co
     };
 
     auto logDecision = [&](bool allow, std::string_view reason) {
+        if (!Hyprview::telemetryEnabled())
+            return;
+
         const auto WINDOW = overviewWindowToRender(OWNER.window);
         const auto ENTRY  = renderedWindowEntryForWindow(WINDOW);
         Hyprview::telemetryLog(std::format(

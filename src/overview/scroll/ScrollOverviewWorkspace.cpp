@@ -131,8 +131,10 @@ double CScrollOverview::horizontalPanForWorkspace(const SP<SWorkspaceEntry>& wor
 
 bool CScrollOverview::setHorizontalPanForWorkspace(const SP<SWorkspaceEntry>& workspace, double pan, bool animate) {
     if (!workspace || !workspace->pWorkspace || !workspaceUsesScrollingLayout(workspace->pWorkspace)) {
-        Hyprview::telemetryLog(std::format("event=pan-set-skip reason=invalid-or-not-scrolling workspace={} requestedPan={:.2f} animate={}",
-                                           workspaceID(workspace ? workspace->pWorkspace : PHLWORKSPACE{}), pan, Hyprview::boolToken(animate)));
+        Hyprview::telemetryLogLazy([&] {
+            return std::format("event=pan-set-skip reason=invalid-or-not-scrolling workspace={} requestedPan={:.2f} animate={}",
+                               workspaceID(workspace ? workspace->pWorkspace : PHLWORKSPACE{}), pan, Hyprview::boolToken(animate));
+        });
         return false;
     }
 
@@ -148,12 +150,14 @@ bool CScrollOverview::setHorizontalPanForWorkspace(const SP<SWorkspaceEntry>& wo
 
     const auto CURRENT = sc<double>(ANIM->value());
 
-    Hyprview::telemetryLog(std::format("event=pan-set workspace={} requestedPan={:.2f} clampedPan={:.2f} currentPan={:.2f} range={:.2f},{:.2f} animate={}",
-                                       workspaceID(workspace->pWorkspace), pan, CLAMPED, CURRENT, RANGE.min, RANGE.max, Hyprview::boolToken(animate)));
+    Hyprview::telemetryLogLazy([&] {
+        return std::format("event=pan-set workspace={} requestedPan={:.2f} clampedPan={:.2f} currentPan={:.2f} range={:.2f},{:.2f} animate={}", workspaceID(workspace->pWorkspace),
+                           pan, CLAMPED, CURRENT, RANGE.min, RANGE.max, Hyprview::boolToken(animate));
+    });
 
     if (std::abs(CURRENT - CLAMPED) < 0.5) {
-        Hyprview::telemetryLog(
-            std::format("event=pan-set-skip reason=noop workspace={} currentPan={:.2f} clampedPan={:.2f}", workspaceID(workspace->pWorkspace), CURRENT, CLAMPED));
+        Hyprview::telemetryLogLazy(
+            [&] { return std::format("event=pan-set-skip reason=noop workspace={} currentPan={:.2f} clampedPan={:.2f}", workspaceID(workspace->pWorkspace), CURRENT, CLAMPED); });
         return false;
     }
 

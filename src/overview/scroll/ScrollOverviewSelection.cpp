@@ -80,17 +80,10 @@ SP<CScrollOverview::SWorkspaceEntry> CScrollOverview::workspaceEntryForWindowEnt
     if (!image)
         return nullptr;
 
-    for (const auto& workspaceEntry : workspaceEntries) {
-        if (!workspaceEntry)
-            continue;
+    rebuildWindowEntryLookups();
 
-        for (const auto& entry : workspaceEntry->windowEntries) {
-            if (entry == image)
-                return workspaceEntry;
-        }
-    }
-
-    return nullptr;
+    const auto IT = windowEntryWorkspaceLookup.find(image.get());
+    return IT == windowEntryWorkspaceLookup.end() ? nullptr : IT->second;
 }
 
 SP<CScrollOverview::SWindowEntry> CScrollOverview::selectableEntryForWorkspace(const SP<SWorkspaceEntry>& workspace) const {
@@ -132,21 +125,25 @@ SP<CScrollOverview::SWindowEntry> CScrollOverview::entryForKeyboardSelection() c
 
 void CScrollOverview::centerWindowEntryInScrollingWorkspace(SP<SWindowEntry> image, bool animate) {
     if (!pMonitor || !image || !image->pWindow) {
-        Hyprview::telemetryLog(std::format("event=selection-center-skip reason=invalid-input animate={}", Hyprview::boolToken(animate)));
+        Hyprview::telemetryLogLazy([&] { return std::format("event=selection-center-skip reason=invalid-input animate={}", Hyprview::boolToken(animate)); });
         return;
     }
 
     const auto WINDOW = image->pWindow.lock();
     if (!WINDOW || WINDOW->m_isFloating || !WINDOW->m_realPosition || !WINDOW->m_realSize) {
-        Hyprview::telemetryLog(std::format("event=selection-center-skip reason=invalid-window window={} floating={} animate={}", windowID(WINDOW),
-                                           Hyprview::boolToken(WINDOW && WINDOW->m_isFloating), Hyprview::boolToken(animate)));
+        Hyprview::telemetryLogLazy([&] {
+            return std::format("event=selection-center-skip reason=invalid-window window={} floating={} animate={}", windowID(WINDOW),
+                               Hyprview::boolToken(WINDOW && WINDOW->m_isFloating), Hyprview::boolToken(animate));
+        });
         return;
     }
 
     const auto WORKSPACE = workspaceEntryForWindowEntry(image);
     if (!WORKSPACE || !workspaceUsesScrollingLayout(WORKSPACE->pWorkspace)) {
-        Hyprview::telemetryLog(std::format("event=selection-center-skip reason=not-scrolling window={} workspace={} animate={}", windowID(WINDOW),
-                                           workspaceID(WORKSPACE ? WORKSPACE->pWorkspace : PHLWORKSPACE{}), Hyprview::boolToken(animate)));
+        Hyprview::telemetryLogLazy([&] {
+            return std::format("event=selection-center-skip reason=not-scrolling window={} workspace={} animate={}", windowID(WINDOW),
+                               workspaceID(WORKSPACE ? WORKSPACE->pWorkspace : PHLWORKSPACE{}), Hyprview::boolToken(animate));
+        });
         return;
     }
 
@@ -158,14 +155,18 @@ void CScrollOverview::centerWindowEntryInScrollingWorkspace(SP<SWindowEntry> ima
     const double CURRENT_PAN   = horizontalPanForWorkspace(WORKSPACE);
     const double delta         = TARGET_PAN - CURRENT_PAN;
 
-    Hyprview::telemetryLog(std::format("event=selection-center-window window={} workspace={} targetPos={} targetSize={} targetCenter={:.2f} requestedPan={:.2f} currentPan={:.2f} "
-                                       "delta={:.2f} range={:.2f},{:.2f} animate={}",
-                                       windowID(WINDOW), workspaceID(WORKSPACE->pWorkspace), Hyprview::formatVector(TARGET_POS), Hyprview::formatVector(TARGET_SIZE), TARGET_CENTER,
-                                       TARGET_PAN, CURRENT_PAN, delta, RANGE.min, RANGE.max, Hyprview::boolToken(animate)));
+    Hyprview::telemetryLogLazy([&] {
+        return std::format("event=selection-center-window window={} workspace={} targetPos={} targetSize={} targetCenter={:.2f} requestedPan={:.2f} currentPan={:.2f} "
+                           "delta={:.2f} range={:.2f},{:.2f} animate={}",
+                           windowID(WINDOW), workspaceID(WORKSPACE->pWorkspace), Hyprview::formatVector(TARGET_POS), Hyprview::formatVector(TARGET_SIZE), TARGET_CENTER, TARGET_PAN,
+                           CURRENT_PAN, delta, RANGE.min, RANGE.max, Hyprview::boolToken(animate));
+    });
 
     if (std::abs(delta) < 0.5) {
-        Hyprview::telemetryLog(std::format("event=selection-center-skip reason=already-centered window={} workspace={} currentPan={:.2f} requestedPan={:.2f}", windowID(WINDOW),
-                                           workspaceID(WORKSPACE->pWorkspace), CURRENT_PAN, TARGET_PAN));
+        Hyprview::telemetryLogLazy([&] {
+            return std::format("event=selection-center-skip reason=already-centered window={} workspace={} currentPan={:.2f} requestedPan={:.2f}", windowID(WINDOW),
+                               workspaceID(WORKSPACE->pWorkspace), CURRENT_PAN, TARGET_PAN);
+        });
         return;
     }
 
@@ -181,10 +182,12 @@ void CScrollOverview::setKeyboardSelection(SP<SWindowEntry> image, bool lockedTo
     const auto WINDOW        = image && image->pWindow ? image->pWindow.lock() : PHLWINDOW{};
     const auto ACTIVE        = Desktop::focusState()->window();
 
-    Hyprview::telemetryLog(
-        std::format("event=selection-set old={} new={} newWorkspace={} locked={} damage={} focusFollowsSelection={} active={} activeWorkspace={}", windowID(OLD_SELECTION.lock()),
-                    windowID(WINDOW), workspaceID(WINDOW ? WINDOW->m_workspace : PHLWORKSPACE{}), Hyprview::boolToken(lockedToKeyboard), Hyprview::boolToken(damageOnChange),
-                    Hyprview::boolToken(g_hyprviewConfig.keyboard.focusFollowsSelection), windowID(ACTIVE), workspaceID(ACTIVE ? ACTIVE->m_workspace : PHLWORKSPACE{})));
+    Hyprview::telemetryLogLazy([&] {
+        return std::format("event=selection-set old={} new={} newWorkspace={} locked={} damage={} focusFollowsSelection={} active={} activeWorkspace={}",
+                           windowID(OLD_SELECTION.lock()), windowID(WINDOW), workspaceID(WINDOW ? WINDOW->m_workspace : PHLWORKSPACE{}), Hyprview::boolToken(lockedToKeyboard),
+                           Hyprview::boolToken(damageOnChange), Hyprview::boolToken(g_hyprviewConfig.keyboard.focusFollowsSelection), windowID(ACTIVE),
+                           workspaceID(ACTIVE ? ACTIVE->m_workspace : PHLWORKSPACE{}));
+    });
 
     if (WINDOW) {
         keyboardSelectedWindow  = WINDOW;
@@ -210,9 +213,11 @@ void CScrollOverview::setKeyboardSelection(SP<SWindowEntry> image, bool lockedTo
 }
 
 void CScrollOverview::syncSelectionToViewport(bool damageOnChange) {
-    Hyprview::telemetryLog(std::format("event=selection-sync-start enabled={} workspaceEntries={} viewportIndex={} old={} locked={} damage={}",
-                                       Hyprview::boolToken(g_hyprviewConfig.keyboard.enabled), workspaceEntries.size(), viewportCurrentWorkspace,
-                                       windowID(keyboardSelectedWindow.lock()), Hyprview::boolToken(keyboardSelectionLocked), Hyprview::boolToken(damageOnChange)));
+    Hyprview::telemetryLogLazy([&] {
+        return std::format("event=selection-sync-start enabled={} workspaceEntries={} viewportIndex={} old={} locked={} damage={}",
+                           Hyprview::boolToken(g_hyprviewConfig.keyboard.enabled), workspaceEntries.size(), viewportCurrentWorkspace, windowID(keyboardSelectedWindow.lock()),
+                           Hyprview::boolToken(keyboardSelectionLocked), Hyprview::boolToken(damageOnChange));
+    });
 
     if (!g_hyprviewConfig.keyboard.enabled) {
         setKeyboardSelection(nullptr, false, damageOnChange);
@@ -232,9 +237,11 @@ void CScrollOverview::syncSelectionToViewport(bool damageOnChange) {
 
     const auto NEW_SELECTION = keyboardSelectedWindow.lock();
 
-    Hyprview::telemetryLog(std::format("event=selection-sync-end viewportIndex={} viewportWorkspace={} old={} new={}", viewportCurrentWorkspace,
-                                       workspaceID(workspaceEntries[viewportCurrentWorkspace] ? workspaceEntries[viewportCurrentWorkspace]->pWorkspace : PHLWORKSPACE{}),
-                                       windowID(OLD_SELECTION), windowID(NEW_SELECTION)));
+    Hyprview::telemetryLogLazy([&] {
+        return std::format("event=selection-sync-end viewportIndex={} viewportWorkspace={} old={} new={}", viewportCurrentWorkspace,
+                           workspaceID(workspaceEntries[viewportCurrentWorkspace] ? workspaceEntries[viewportCurrentWorkspace]->pWorkspace : PHLWORKSPACE{}),
+                           windowID(OLD_SELECTION), windowID(NEW_SELECTION));
+    });
 }
 
 bool CScrollOverview::moveHorizontalSelection(bool right) {

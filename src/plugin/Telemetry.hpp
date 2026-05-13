@@ -11,6 +11,7 @@
 #include <mutex>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #include <hyprutils/math/Box.hpp>
 #include <hyprutils/math/Region.hpp>
@@ -69,6 +70,14 @@ namespace Hyprview {
         localtime_r(&TIME_T, &tm);
 
         out << std::put_time(&tm, "%F %T") << "." << std::setw(3) << std::setfill('0') << MS.count() << " " << message << "\n";
+    }
+
+    template <typename F>
+    inline void telemetryLogLazy(F&& makeMessage) {
+        if (!telemetryEnabled())
+            return;
+
+        telemetryLog(std::forward<F>(makeMessage)());
     }
 
 }

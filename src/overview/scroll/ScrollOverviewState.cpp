@@ -34,10 +34,13 @@ void CScrollOverview::refreshWorkspaceEntries(PHLWORKSPACE preferredViewport, bo
         workspaceEntries[viewportCurrentWorkspace]->pWorkspace :
         PHLWORKSPACE{};
 
-    Hyprview::telemetryLog(std::format("event=refresh-workspaces-start preferred={} fallback={} warp={} oldImages={} viewportIndex={} activeWorkspace={}",
-                                       workspaceID(preferredViewport), workspaceID(FALLBACK_VIEWPORT), Hyprview::boolToken(warpViewport), workspaceEntries.size(),
-                                       viewportCurrentWorkspace, workspaceID(pMonitor->m_activeWorkspace)));
+    Hyprview::telemetryLogLazy([&] {
+        return std::format("event=refresh-workspaces-start preferred={} fallback={} warp={} oldImages={} viewportIndex={} activeWorkspace={}", workspaceID(preferredViewport),
+                           workspaceID(FALLBACK_VIEWPORT), Hyprview::boolToken(warpViewport), workspaceEntries.size(), viewportCurrentWorkspace,
+                           workspaceID(pMonitor->m_activeWorkspace));
+    });
 
+    invalidateWindowEntryLookups();
     workspaceEntries.clear();
 
     for (const auto& w : g_pCompositor->getWorkspaces()) {
@@ -50,10 +53,12 @@ void CScrollOverview::refreshWorkspaceEntries(PHLWORKSPACE preferredViewport, bo
 
     for (size_t i = 0; i < workspaceEntries.size(); ++i) {
         const auto& ENTRY = workspaceEntries[i];
-        Hyprview::telemetryLog(std::format("event=refresh-workspace-image index={} workspace={} name={} displayable={} scrolling={}", i,
-                                           workspaceID(ENTRY ? ENTRY->pWorkspace : PHLWORKSPACE{}), ENTRY && ENTRY->pWorkspace ? ENTRY->pWorkspace->m_name : "<none>",
-                                           Hyprview::boolToken(ENTRY && workspaceHasDisplayableWindows(ENTRY->pWorkspace)),
-                                           Hyprview::boolToken(ENTRY && workspaceUsesScrollingLayout(ENTRY->pWorkspace))));
+        Hyprview::telemetryLogLazy([&] {
+            return std::format("event=refresh-workspace-image index={} workspace={} name={} displayable={} scrolling={}", i,
+                               workspaceID(ENTRY ? ENTRY->pWorkspace : PHLWORKSPACE{}), ENTRY && ENTRY->pWorkspace ? ENTRY->pWorkspace->m_name : "<none>",
+                               Hyprview::boolToken(ENTRY && workspaceHasDisplayableWindows(ENTRY->pWorkspace)),
+                               Hyprview::boolToken(ENTRY && workspaceUsesScrollingLayout(ENTRY->pWorkspace)));
+        });
     }
 
     refreshingWorkspaceEntries = true;
@@ -82,13 +87,15 @@ void CScrollOverview::refreshWorkspaceEntries(PHLWORKSPACE preferredViewport, bo
             normalizeViewportAnchor(VIEWPORT_WORKSPACE);
     }
 
-    Hyprview::telemetryLog(std::format(
-        "event=refresh-workspaces-end workspaceEntries={} viewportIndex={} viewportWorkspace={} viewOffset={} centeredPreferred={} movedViewport={} "
-        "normalizeAnchor={}",
-        workspaceEntries.size(), viewportCurrentWorkspace,
-        workspaceID(viewportCurrentWorkspace < workspaceEntries.size() && workspaceEntries[viewportCurrentWorkspace] ? workspaceEntries[viewportCurrentWorkspace]->pWorkspace :
-                                                                                                                       PHLWORKSPACE{}),
-        Hyprview::formatVector(viewOffset->value()), Hyprview::boolToken(centeredPreferred), Hyprview::boolToken(movedViewport), Hyprview::boolToken(NORMALIZE_ANCHOR)));
+    Hyprview::telemetryLogLazy([&] {
+        return std::format(
+            "event=refresh-workspaces-end workspaceEntries={} viewportIndex={} viewportWorkspace={} viewOffset={} centeredPreferred={} movedViewport={} "
+            "normalizeAnchor={}",
+            workspaceEntries.size(), viewportCurrentWorkspace,
+            workspaceID(viewportCurrentWorkspace < workspaceEntries.size() && workspaceEntries[viewportCurrentWorkspace] ? workspaceEntries[viewportCurrentWorkspace]->pWorkspace :
+                                                                                                                           PHLWORKSPACE{}),
+            Hyprview::formatVector(viewOffset->value()), Hyprview::boolToken(centeredPreferred), Hyprview::boolToken(movedViewport), Hyprview::boolToken(NORMALIZE_ANCHOR));
+    });
 
     damage();
 }

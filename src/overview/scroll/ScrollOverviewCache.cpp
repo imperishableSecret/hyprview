@@ -16,6 +16,8 @@ void CScrollOverview::rebuildWorkspaceEntries(PHLWORKSPACE workspace) {
     if (!refreshingWorkspaceEntries && pMonitor->m_activeWorkspace != startedOn && !closing)
         onWorkspaceChange();
 
+    invalidateWindowEntryLookups();
+
     auto overview = workspaceEntryForWorkspace(workspace);
     if (!overview)
         return;
