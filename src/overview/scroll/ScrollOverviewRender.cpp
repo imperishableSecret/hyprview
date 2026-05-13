@@ -268,15 +268,7 @@ void CScrollOverview::renderActiveWindowIndicator(SP<SWindowEntry> entry) {
 }
 
 void CScrollOverview::renderDropTargetFeedback() {
-    if (!hasDropTarget())
-        return;
-
-    if (inputState.dropTarget.type == eDropTargetType::WORKSPACE_INSERTION)
-        return;
-
-    CBox texbox = shrinkBox(inputState.dropTarget.markerBox, 8.0);
-    texbox.scale(pMonitor->m_scale).round();
-    g_pHyprOpenGL->renderRect(texbox, CHyprColor{g_hyprviewConfig.scrolling.dropTargetColor}, Render::GL::CHyprOpenGLImpl::SRectRenderData{.round = 8});
+    return;
 }
 CBox CScrollOverview::draggedLiveWindowBox() const {
     if (inputState.mode != ePointerMode::WINDOW_DRAG || !inputState.windowDrag)

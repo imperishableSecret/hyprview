@@ -1,6 +1,7 @@
 #include "ScrollOverview.hpp"
 #include "../../plugin/Telemetry.hpp"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <format>
@@ -105,6 +106,27 @@ namespace {
     void logWindowTelemetry(std::string_view event, PHLWINDOW window, const CBox& overviewBox, bool intersects, std::string_view reason = "") {
         Hyprview::telemetryLog(std::format("frame={} event={} reason={} overviewBox={} intersects={} {}", g_currentTelemetryFrame, event, reason, Hyprview::formatBox(overviewBox),
                                            boolText(intersects), windowState(window)));
+    }
+
+    void renderBoxBorder(CBox box, PHLMONITOR monitor, const CHyprColor& color, double thickness) {
+        if (!monitor || box.empty() || color.a <= 0.0 || thickness <= 0.0)
+            return;
+
+        thickness = std::min(thickness, std::min(box.w, box.h) / 2.0);
+        if (thickness <= 0.0)
+            return;
+
+        const std::array<CBox, 4> EDGES = {
+            CBox{box.x, box.y, box.w, thickness},
+            CBox{box.x, box.y + box.h - thickness, box.w, thickness},
+            CBox{box.x, box.y, thickness, box.h},
+            CBox{box.x + box.w - thickness, box.y, thickness, box.h},
+        };
+
+        for (auto edge : EDGES) {
+            edge.scale(monitor->m_scale).round();
+            g_pHyprOpenGL->renderRect(edge, color, Render::GL::CHyprOpenGLImpl::SRectRenderData{.round = 0});
+        }
     }
 
     bool overviewBoxTooSmallForLiveRender(const CBox& box) {
@@ -519,10 +541,8 @@ void CScrollOverview::renderDraggedWindowLive(const Time::steady_tp& now) {
 
     renderWindowLive(WINDOW, DRAG_BOX, now, ALPHA);
 
-    CBox texbox = DRAG_BOX;
-    texbox.scale(pMonitor->m_scale).round();
-    g_pHyprOpenGL->renderRect(texbox, VALID_DROP ? CHyprColor{g_hyprviewConfig.scrolling.hoverColor} : CHyprColor{g_hyprviewConfig.scrolling.invalidInsertionMarkerColor},
-                              Render::GL::CHyprOpenGLImpl::SRectRenderData{.round = 5});
+    if (!VALID_DROP)
+        renderBoxBorder(DRAG_BOX, pMonitor.lock(), CHyprColor{g_hyprviewConfig.scrolling.invalidInsertionMarkerColor}, 4.0);
 }
 
 void CScrollOverview::renderPinnedFloatingWindowsLive(const Time::steady_tp& now) {
