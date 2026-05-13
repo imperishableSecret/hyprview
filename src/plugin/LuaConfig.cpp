@@ -9,6 +9,7 @@
 
 #include <hyprland/src/config/ConfigManager.hpp>
 #include <hyprland/src/config/lua/bindings/LuaBindingsInternal.hpp>
+#include <hyprland/src/config/shared/parserUtils/ParserUtils.hpp>
 #include <hyprland/src/helpers/MiscFunctions.hpp>
 
 extern "C" {
@@ -129,7 +130,7 @@ namespace {
         }
 
         if (lua_isstring(L, -1)) {
-            const auto PARSED = configStringToInt(lua_tostring(L, -1));
+            const auto PARSED = Config::ParserUtils::parseColor(lua_tostring(L, -1));
             lua_pop(L, 1);
             if (!PARSED)
                 return std::unexpected(std::format("{} must be a color: {}", key, PARSED.error()));
