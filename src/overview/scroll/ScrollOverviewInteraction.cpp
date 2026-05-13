@@ -360,6 +360,17 @@ void CScrollOverview::beginWindowDrag() {
         return;
     }
 
+    rebuildGeometryCache();
+    if (const auto ENTRY = renderedWindowEntryForWindow(DRAG_WINDOW); ENTRY && !ENTRY->overviewBox.empty()) {
+        inputState.windowDrag->sourceBox       = ENTRY->overviewBox;
+        inputState.windowDrag->grabOffsetLocal = inputState.lastPosLocal - ENTRY->overviewBox.pos();
+    }
+
+    if (inputState.windowDrag->sourceBox.empty()) {
+        cancelPointerInteraction();
+        return;
+    }
+
     closeOnWindow    = DRAG_WINDOW;
     closeOnWorkspace = DRAG_WINDOW->m_workspace;
     rememberWindowSelection(DRAG_WINDOW);
@@ -373,6 +384,9 @@ void CScrollOverview::beginWindowDrag() {
 
     inputState.mode = ePointerMode::WINDOW_DRAG;
     updateWindowDrag(inputState.lastPosLocal);
+
+    if (pMonitor)
+        g_pCompositor->scheduleFrameForMonitor(pMonitor.lock());
 }
 
 void CScrollOverview::updateWindowDrag(const Vector2D& local) {

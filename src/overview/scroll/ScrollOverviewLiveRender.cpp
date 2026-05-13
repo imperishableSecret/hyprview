@@ -438,6 +438,7 @@ void CScrollOverview::renderWorkspaceLive(const SP<SWorkspaceEntry>& workspaceEn
 
     std::vector<PHLWINDOW> renderedWindows;
     const auto             DRAGGED_WINDOW   = overviewWindowToRender((inputState.windowDrag ? inputState.windowDrag->window.lock() : PHLWINDOW{}));
+    const bool             HAS_DRAG_PREVIEW = inputState.mode == ePointerMode::WINDOW_DRAG && !draggedLiveWindowBox().empty();
     size_t                 submittedWindows = 0;
     size_t                 skippedState     = 0;
     size_t                 skippedCull      = 0;
@@ -462,7 +463,7 @@ void CScrollOverview::renderWorkspaceLive(const SP<SWorkspaceEntry>& workspaceEn
                                        boolText(WINDOW && windowBelongsToWorkspaceInOverview(WINDOW, workspaceEntry->pWorkspace)), Hyprview::formatBox(CURRENT_RAW),
                                        Hyprview::formatBox(GOAL_RAW), PAN, scale->value()));
 
-        if (!RENDERABLE || WINDOW == DRAGGED_WINDOW || (WINDOW->m_pinned && WINDOW->m_isFloating)) {
+        if (!RENDERABLE || (HAS_DRAG_PREVIEW && WINDOW == DRAGGED_WINDOW) || (WINDOW->m_pinned && WINDOW->m_isFloating)) {
             ++skippedState;
             logWindowTelemetry("window-candidate-skip", WINDOW, entry ? entry->overviewBox : CBox{}, INTERSECTS,
                                !RENDERABLE ? "not-live-renderable" : (WINDOW == DRAGGED_WINDOW ? "dragged-window" : "pinned-floating"));
@@ -535,7 +536,10 @@ void CScrollOverview::renderDraggedWindowLive(const Time::steady_tp& now) {
     if (!WINDOW)
         return;
 
-    const auto DRAG_BOX   = draggedLiveWindowBox();
+    const auto DRAG_BOX = draggedLiveWindowBox();
+    if (DRAG_BOX.empty())
+        return;
+
     const bool VALID_DROP = hasDropTarget();
     const auto ALPHA      = std::clamp(VALID_DROP ? g_hyprviewConfig.scrolling.dragAlpha : g_hyprviewConfig.scrolling.invalidDragAlpha, 0.0F, 1.0F);
 
