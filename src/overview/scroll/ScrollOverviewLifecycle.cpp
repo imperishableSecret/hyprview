@@ -199,7 +199,7 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
                 return;
             }
 
-            focusWorkspaceInViewport(WORKSPACE, window->m_workspace == pMonitor->m_activeWorkspace, false);
+            focusWorkspaceInViewport(WORKSPACE, false, false);
             rebuildGeometryCache();
         }
 
@@ -215,7 +215,7 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
         if (closing || !pMonitor || !workspace || workspace->m_isSpecialWorkspace || workspace->m_monitor != pMonitor)
             return;
 
-        queueRefreshWorkspaceEntries(workspace, true);
+        queueRefreshWorkspaceEntries(workspace, false);
     };
 
     mouseMoveHook = Event::bus()->m_events.input.mouse.move.listen([onCursorMove](Vector2D, Event::SCallbackInfo& info) { onCursorMove(info); });
