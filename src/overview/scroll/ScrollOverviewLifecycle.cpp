@@ -280,13 +280,11 @@ void CScrollOverview::close(bool switchToSelection) {
     const auto TARGET_WORKSPACE = switchToSelection ? (closeOnWindow && closeOnWindow->m_workspace ? closeOnWindow->m_workspace : closeOnWorkspace.lock()) :
                                                       (FOCUSED_WINDOW && FOCUSED_WINDOW->m_workspace ? FOCUSED_WINDOW->m_workspace : pMonitor->m_activeWorkspace);
     const bool TARGET_IS_ACTIVE = (!TARGET_WINDOW || TARGET_WINDOW == FOCUSED_WINDOW) && TARGET_WORKSPACE == pMonitor->m_activeWorkspace;
+    const auto FINAL_WORKSPACE  = TARGET_WORKSPACE ? TARGET_WORKSPACE : pMonitor->m_activeWorkspace;
 
     if (switchToSelection && !TARGET_IS_ACTIVE) {
-        if (TARGET_WORKSPACE && TARGET_WORKSPACE != pMonitor->m_activeWorkspace) {
-            g_pDesktopAnimationManager->startAnimation(pMonitor->m_activeWorkspace, CDesktopAnimationManager::ANIMATION_TYPE_OUT, true, true);
-            g_pDesktopAnimationManager->startAnimation(TARGET_WORKSPACE, CDesktopAnimationManager::ANIMATION_TYPE_IN, false, true);
+        if (TARGET_WORKSPACE && TARGET_WORKSPACE != pMonitor->m_activeWorkspace)
             pMonitor->changeWorkspace(TARGET_WORKSPACE, true, true, true);
-        }
 
         if (TARGET_WINDOW)
             Desktop::focusState()->fullWindowFocus(TARGET_WINDOW, Desktop::FOCUS_REASON_KEYBIND);
@@ -294,13 +292,10 @@ void CScrollOverview::close(bool switchToSelection) {
 
     if (TARGET_WINDOW)
         keyboardSelectedWindow = TARGET_WINDOW;
+    if (FINAL_WORKSPACE)
+        startedOn = FINAL_WORKSPACE;
 
     rebuildGeometryCache();
-
-    const auto FINAL_WORKSPACE = TARGET_WORKSPACE ? TARGET_WORKSPACE : pMonitor->m_activeWorkspace;
-    if (const auto WORKSPACE_ENTRY = workspaceEntryForWorkspace(FINAL_WORKSPACE)) {
-        setHorizontalPanForWorkspace(WORKSPACE_ENTRY, 0.0, true);
-    }
 
     *viewOffset = Vector2D{};
 
