@@ -284,7 +284,7 @@ void CScrollOverview::close(bool switchToSelection) {
 
     if (switchToSelection && !TARGET_IS_ACTIVE) {
         if (TARGET_WORKSPACE && TARGET_WORKSPACE != pMonitor->m_activeWorkspace)
-            pMonitor->changeWorkspace(TARGET_WORKSPACE, true, true, true);
+            activateWorkspace(TARGET_WORKSPACE, false);
 
         if (TARGET_WINDOW)
             Desktop::focusState()->fullWindowFocus(TARGET_WINDOW, Desktop::FOCUS_REASON_KEYBIND);
@@ -293,9 +293,12 @@ void CScrollOverview::close(bool switchToSelection) {
     if (TARGET_WINDOW)
         keyboardSelectedWindow = TARGET_WINDOW;
     if (FINAL_WORKSPACE)
-        startedOn = FINAL_WORKSPACE;
+        reanchorViewportToWorkspace(FINAL_WORKSPACE, true);
 
     rebuildGeometryCache();
+
+    if (const auto WORKSPACE_ENTRY = workspaceEntryForWorkspace(FINAL_WORKSPACE))
+        setHorizontalPanForWorkspace(WORKSPACE_ENTRY, 0.0, true);
 
     *viewOffset = Vector2D{};
 

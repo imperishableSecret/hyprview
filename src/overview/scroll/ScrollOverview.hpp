@@ -151,6 +151,7 @@ class CScrollOverview : public IOverview {
     bool                     moveViewportWorkspace(bool up);
     bool                     setViewportWorkspace(size_t index, bool warp = false, bool activate = false);
     bool                     focusWorkspaceInViewport(SP<SWorkspaceEntry> workspace, bool warp = false, bool activate = false);
+    bool                     reanchorViewportToWorkspace(PHLWORKSPACE workspace, bool preserveVisualOffset = true);
     bool                     moveViewportBy(double deltaY, bool warp = true, bool activate = false);
     bool                     setViewportOffset(Vector2D offset, bool warp = false, bool activate = false);
     void                     syncViewportWorkspaceFromOffset(const Vector2D& offset);

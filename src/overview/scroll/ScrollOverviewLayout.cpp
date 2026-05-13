@@ -63,6 +63,34 @@ bool CScrollOverview::focusWorkspaceInViewport(SP<SWorkspaceEntry> workspace, bo
     return false;
 }
 
+bool CScrollOverview::reanchorViewportToWorkspace(PHLWORKSPACE workspace, bool preserveVisualOffset) {
+    if (!workspace || workspaceEntries.empty() || !viewOffset)
+        return false;
+
+    const auto INDEX = workspaceEntryIndex(workspace);
+    if (!INDEX)
+        return false;
+
+    Vector2D offset = {};
+    if (preserveVisualOffset) {
+        const auto OLD_ANCHOR_INDEX = activeWorkspaceEntryIndex();
+        offset                      = viewOffset->value();
+        offset.y += (sc<double>(OLD_ANCHOR_INDEX) - sc<double>(*INDEX)) * workspaceOverviewStep();
+    }
+
+    startedOn = workspace;
+
+    if (preserveVisualOffset) {
+        viewOffset->setValueAndWarp(clampedViewOffset(offset));
+        syncViewportWorkspaceFromOffset(viewOffset->value());
+    } else {
+        viewportCurrentWorkspace = *INDEX;
+        viewOffset->setValueAndWarp({});
+    }
+
+    return true;
+}
+
 bool CScrollOverview::moveViewportBy(double deltaY, bool warp, bool activate) {
     return setViewportOffset(viewOffset->value() + Vector2D{0.0, deltaY}, warp, activate);
 }
