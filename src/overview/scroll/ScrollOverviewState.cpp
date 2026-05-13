@@ -65,14 +65,24 @@ void CScrollOverview::refreshWorkspaceEntries(PHLWORKSPACE preferredViewport, bo
     const auto VIEWPORT_WORKSPACE = preferredViewport ? preferredViewport : FALLBACK_VIEWPORT;
     bool       centeredPreferred  = false;
     bool       movedViewport      = false;
+    const bool ANCHOR_TO_ACTIVE   = VIEWPORT_WORKSPACE && warpViewport && pMonitor->m_activeWorkspace == VIEWPORT_WORKSPACE;
     const bool NORMALIZE_ANCHOR   = VIEWPORT_WORKSPACE && !warpViewport && pMonitor->m_activeWorkspace == VIEWPORT_WORKSPACE;
     if (VIEWPORT_WORKSPACE) {
         if (const auto INDEX = workspaceEntryIndex(VIEWPORT_WORKSPACE); INDEX) {
-            if (NORMALIZE_ANCHOR)
-                queueViewportAnchorNormalization(VIEWPORT_WORKSPACE);
+            if (ANCHOR_TO_ACTIVE) {
+                startedOn                = VIEWPORT_WORKSPACE;
+                viewportCurrentWorkspace = *INDEX;
+                viewOffset->setValueAndWarp({});
+                syncSelectionToViewport(false);
+                rebuildGeometryCache();
+                centeredPreferred = true;
+            } else {
+                if (NORMALIZE_ANCHOR)
+                    queueViewportAnchorNormalization(VIEWPORT_WORKSPACE);
 
-            movedViewport     = setViewportWorkspace(*INDEX, warpViewport);
-            centeredPreferred = true;
+                movedViewport     = setViewportWorkspace(*INDEX, warpViewport);
+                centeredPreferred = true;
+            }
         } else if (!workspaceEntries.empty())
             movedViewport = setViewportWorkspace(std::min(viewportCurrentWorkspace, workspaceEntries.size() - 1), true);
     }
@@ -82,13 +92,14 @@ void CScrollOverview::refreshWorkspaceEntries(PHLWORKSPACE preferredViewport, bo
             normalizeViewportAnchor(VIEWPORT_WORKSPACE);
     }
 
-    Hyprview::telemetryLog(std::format(
-        "event=refresh-workspaces-end workspaceEntries={} viewportIndex={} viewportWorkspace={} viewOffset={} centeredPreferred={} movedViewport={} "
-        "normalizeAnchor={}",
-        workspaceEntries.size(), viewportCurrentWorkspace,
-        workspaceID(viewportCurrentWorkspace < workspaceEntries.size() && workspaceEntries[viewportCurrentWorkspace] ? workspaceEntries[viewportCurrentWorkspace]->pWorkspace :
-                                                                                                                       PHLWORKSPACE{}),
-        Hyprview::formatVector(viewOffset->value()), Hyprview::boolToken(centeredPreferred), Hyprview::boolToken(movedViewport), Hyprview::boolToken(NORMALIZE_ANCHOR)));
+    Hyprview::telemetryLog(std::format("event=refresh-workspaces-end workspaceEntries={} viewportIndex={} viewportWorkspace={} viewOffset={} centeredPreferred={} movedViewport={} "
+                                       "normalizeAnchor={} anchorToActive={}",
+                                       workspaceEntries.size(), viewportCurrentWorkspace,
+                                       workspaceID(viewportCurrentWorkspace < workspaceEntries.size() && workspaceEntries[viewportCurrentWorkspace] ?
+                                                       workspaceEntries[viewportCurrentWorkspace]->pWorkspace :
+                                                       PHLWORKSPACE{}),
+                                       Hyprview::formatVector(viewOffset->value()), Hyprview::boolToken(centeredPreferred), Hyprview::boolToken(movedViewport),
+                                       Hyprview::boolToken(NORMALIZE_ANCHOR), Hyprview::boolToken(ANCHOR_TO_ACTIVE)));
 
     damage();
 }
@@ -102,7 +113,8 @@ void CScrollOverview::queueRefreshWorkspaceEntries(PHLWORKSPACE preferredViewpor
     else if (!queuedRefreshWorkspace && pMonitor)
         queuedRefreshWorkspace = pMonitor->m_activeWorkspace;
 
-    queuedRefreshWarp = queuedRefreshWarp && warpViewport;
+    const bool ACTIVE_WORKSPACE_REFRESH = preferredViewport && pMonitor && preferredViewport == pMonitor->m_activeWorkspace && warpViewport;
+    queuedRefreshWarp                   = ACTIVE_WORKSPACE_REFRESH ? true : (queuedRefreshWarp && warpViewport);
 
     if (refreshQueued)
         return;

@@ -311,9 +311,9 @@ bool CScrollOverview::moveSelection(Vector2D direction) {
 
     if (!moved && g_hyprviewConfig.keyboard.wrap && !workspaceEntries.empty()) {
         if (MOVE_DOWN && viewportCurrentWorkspace == workspaceEntries.size() - 1)
-            moved = setViewportWorkspace(0, false, true);
+            moved = setViewportWorkspace(0, false, false);
         else if (!MOVE_DOWN && viewportCurrentWorkspace == 0)
-            moved = setViewportWorkspace(workspaceEntries.size() - 1, false, true);
+            moved = setViewportWorkspace(workspaceEntries.size() - 1, false, false);
     }
 
     if (!moved)

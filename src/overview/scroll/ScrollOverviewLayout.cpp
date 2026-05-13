@@ -38,9 +38,9 @@ bool CScrollOverview::moveViewportWorkspace(bool up) {
         return false;
 
     if (up)
-        return setViewportWorkspace(viewportCurrentWorkspace + 1, false, true);
+        return setViewportWorkspace(viewportCurrentWorkspace + 1, false, false);
 
-    return setViewportWorkspace(viewportCurrentWorkspace - 1, false, true);
+    return setViewportWorkspace(viewportCurrentWorkspace - 1, false, false);
 }
 
 bool CScrollOverview::setViewportWorkspace(size_t index, bool warp, bool activate) {
