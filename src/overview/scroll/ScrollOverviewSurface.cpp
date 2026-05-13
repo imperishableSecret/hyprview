@@ -23,7 +23,6 @@
 #undef private
 
 static constexpr std::chrono::milliseconds OVERVIEW_WINDOW_FRAME_INTERVAL = std::chrono::milliseconds(33);
-static constexpr std::chrono::milliseconds OVERVIEW_IDLE_FRAME_INTERVAL   = std::chrono::milliseconds(100);
 
 static bool                                windowHasOverviewAnimation(PHLWINDOW window) {
     if (!window)
@@ -124,6 +123,41 @@ bool CScrollOverview::surfaceTreeHasFrameCallbacks(SP<CWLSurfaceResource> surfac
         nullptr);
 
     return hasCallbacks;
+}
+
+bool CScrollOverview::hasVisibleRealtimePreviewCallbacks() const {
+    const auto MONITOR = pMonitor.lock();
+    if (!MONITOR || closing)
+        return false;
+
+    auto visibleWindowHasCallbacks = [this, MONITOR](PHLWINDOW window) {
+        window = overviewWindowToRender(window);
+        if (!windowLiveRenderable(window) || !overviewWindowVisible(window) || window->m_monitor != MONITOR)
+            return false;
+
+        return surfaceTreeHasFrameCallbacks(window->wlSurface() ? window->wlSurface()->resource() : nullptr);
+    };
+
+    for (const auto& workspaceEntry : workspaceEntries) {
+        if (!workspaceEntry || workspaceEntry->overviewBox.empty() || !workspaceEntry->overviewBox.overlaps(CBox{{}, MONITOR->m_size}))
+            continue;
+
+        for (const auto& entry : workspaceEntry->windowEntries) {
+            if (entry && visibleWindowHasCallbacks(entry->pWindow.lock()))
+                return true;
+        }
+    }
+
+    for (const auto& window : g_pCompositor->m_windows) {
+        const auto WINDOW = overviewWindowToRender(window);
+        if (!WINDOW || !WINDOW->m_pinned || !WINDOW->m_isFloating)
+            continue;
+
+        if (visibleWindowHasCallbacks(WINDOW))
+            return true;
+    }
+
+    return false;
 }
 
 void CScrollOverview::surfaceTreePresent(SP<CWLSurfaceResource> surface, PHLMONITOR monitor, const Time::steady_tp& now) {
@@ -282,9 +316,13 @@ bool CScrollOverview::shouldAllowSurfaceFrame(SP<CWLSurfaceResource> surface, co
         return true;
     }
 
+    if (!windowLiveRenderable(WINDOW)) {
+        logDecision(false, "window-not-live-renderable");
+        return false;
+    }
+
     if (!overviewWindowVisible(WINDOW)) {
-        scheduleRealtimePreviewFrame();
-        logDecision(false, "window-not-visible-schedule-preview");
+        logDecision(false, "window-not-visible");
         return false;
     }
 
@@ -311,6 +349,11 @@ bool CScrollOverview::shouldAllowRealtimePreviewSchedule() {
 
     if (scale->isBeingAnimated() || viewOffset->isBeingAnimated())
         return true;
+
+    if (!hasVisibleRealtimePreviewCallbacks()) {
+        realtimePreviewFrameQueued = false;
+        return false;
+    }
 
     if (realtimePreviewFrameQueued) {
         scheduleRealtimePreviewFrame();
@@ -368,13 +411,6 @@ void CScrollOverview::schedulePreviewFrameAfter(std::chrono::milliseconds delay)
     wl_event_source_timer_update(realtimePreviewTimer, DELAY);
 }
 
-void CScrollOverview::scheduleMinimumPreviewFrame() {
-    if (closing)
-        return;
-
-    schedulePreviewFrameAfter(OVERVIEW_IDLE_FRAME_INTERVAL);
-}
-
 void CScrollOverview::scheduleRealtimePreviewFrame() {
     const auto NOW     = Time::steadyNow();
     const auto ELAPSED = lastRealtimePreviewFrame.time_since_epoch().count() == 0 ? OVERVIEW_WINDOW_FRAME_INTERVAL :
@@ -395,8 +431,10 @@ int CScrollOverview::realtimePreviewTimerCallback(void* data) {
     if (OVERVIEW->closing || !OVERVIEW->pMonitor)
         return 0;
 
+    if (!OVERVIEW->hasVisibleRealtimePreviewCallbacks())
+        return 0;
+
     OVERVIEW->damage();
-    OVERVIEW->scheduleMinimumPreviewFrame();
 
     return 0;
 }
@@ -417,6 +455,10 @@ void CScrollOverview::sendOverviewFrameCallbacks(const Time::steady_tp& now) {
         if (!windowLiveRenderable(window) || !overviewWindowVisible(window))
             return;
 
+        const auto SURFACE = window->wlSurface() ? window->wlSurface()->resource() : nullptr;
+        if (!surfaceTreeHasFrameCallbacks(SURFACE))
+            return;
+
         if (std::ranges::find(framedWindows, window) != framedWindows.end())
             return;
 
@@ -427,7 +469,7 @@ void CScrollOverview::sendOverviewFrameCallbacks(const Time::steady_tp& now) {
             return;
         }
 
-        surfaceTreePresent(window->wlSurface() ? window->wlSurface()->resource() : nullptr, MONITOR, now);
+        surfaceTreePresent(SURFACE, MONITOR, now);
         sentWindowFrame = true;
     };
 

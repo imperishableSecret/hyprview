@@ -221,11 +221,11 @@ class CScrollOverview : public IOverview {
     bool                     windowEntryVisible(const SP<SWindowEntry>& image) const;
     double                   overviewStyleProgress() const;
     bool                     surfaceTreeHasFrameCallbacks(SP<CWLSurfaceResource> surface) const;
+    bool                     hasVisibleRealtimePreviewCallbacks() const;
     void                     surfaceTreePresent(SP<CWLSurfaceResource> surface, PHLMONITOR monitor, const Time::steady_tp& now);
     void                     sendOverviewFrameCallbacks(const Time::steady_tp& now);
     bool                     shouldAllowRealtimePreviewFrame() const;
     void                     schedulePreviewFrameAfter(std::chrono::milliseconds delay);
-    void                     scheduleMinimumPreviewFrame();
     void                     scheduleRealtimePreviewFrame();
     static int               realtimePreviewTimerCallback(void* data);
     void                     forceSurfaceVisibility(SP<CWLSurfaceResource> surface);

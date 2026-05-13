@@ -81,7 +81,6 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
     pMonitor            = PMONITOR;
 
     realtimePreviewTimer = wl_event_loop_add_timer(g_pCompositor->m_wlEventLoop, realtimePreviewTimerCallback, this);
-    scheduleMinimumPreviewFrame();
 
     for (const auto& w : g_pCompositor->getWorkspaces()) {
         if (w && w->m_monitor == pMonitor && !w->m_isSpecialWorkspace && workspaceVisibleInOverview(w.lock()))
