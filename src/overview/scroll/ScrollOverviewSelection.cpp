@@ -189,6 +189,8 @@ void CScrollOverview::setKeyboardSelection(SP<SWindowEntry> image, bool lockedTo
     if (WINDOW) {
         keyboardSelectedWindow  = WINDOW;
         keyboardSelectionLocked = lockedToKeyboard;
+        if (WINDOW == ACTIVE)
+            rememberWindowSelection(WINDOW);
         if (lockedToKeyboard) {
             rememberWindowSelection(WINDOW);
             keyboardTakeoverMouse();
@@ -300,6 +302,7 @@ bool CScrollOverview::moveSelection(Vector2D direction) {
     if (!g_hyprviewConfig.keyboard.enabled || closing || workspaceEntries.empty())
         return false;
 
+    rememberWindowSelection(keyboardSelectedWindow.lock());
     keyboardSelectionLocked = true;
     keyboardTakeoverMouse();
 
