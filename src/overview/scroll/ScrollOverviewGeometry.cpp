@@ -33,60 +33,85 @@ void CScrollOverview::rebuildGeometryCache() {
     if (!pMonitor)
         return;
 
-    const auto VIEWPORT_CENTER = CBox{{}, pMonitor->m_size}.middle();
-    const auto WINDOW_GAP      = std::max(0.0, static_cast<double>(g_hyprviewConfig.scrolling.windowGap)) / 2.0;
-    float      yoff            = -sc<float>(activeWorkspaceImageIndex()) * pMonitor->m_size.y * scale->value();
+    invalidateWindowEntryLookups();
 
-    for (const auto& wimg : images) {
-        if (!wimg)
+    const auto VIEWPORT_CENTER = CBox{{}, pMonitor->m_size}.middle();
+    const auto WINDOW_GAP      = (std::max(0.0, static_cast<double>(g_hyprviewConfig.scrolling.windowGap)) / 2.0) * overviewStyleProgress();
+    const auto WORKSPACE_STEP  = workspaceOverviewStep() * scale->value();
+    float      yoff            = -sc<float>(activeWorkspaceEntryIndex()) * WORKSPACE_STEP;
+
+    for (const auto& workspaceEntry : workspaceEntries) {
+        if (!workspaceEntry)
             continue;
 
-        const auto CONTENT_PAN_X = horizontalPanForWorkspace(wimg);
+        const auto CONTENT_PAN_X = horizontalPanForWorkspace(workspaceEntry);
 
-        wimg->overviewBox = CBox{{}, pMonitor->m_size};
-        wimg->overviewBox.translate(-VIEWPORT_CENTER).scale(scale->value()).translate(VIEWPORT_CENTER).translate(-viewOffset->value() * scale->value());
-        wimg->overviewBox.translate({0.F, yoff});
-        wimg->hitBox = wimg->overviewBox;
+        workspaceEntry->overviewBox = CBox{{}, pMonitor->m_size};
+        workspaceEntry->overviewBox.translate(-VIEWPORT_CENTER).scale(scale->value()).translate(VIEWPORT_CENTER).translate(-viewOffset->value() * scale->value());
+        workspaceEntry->overviewBox.translate({0.F, yoff});
+        workspaceEntry->hitBox = workspaceEntry->overviewBox;
 
-        for (const auto& img : wimg->windowImages) {
-            if (!img || !img->pWindow)
+        for (const auto& entry : workspaceEntry->windowEntries) {
+            if (!entry || !entry->pWindow)
                 continue;
 
-            const auto WINDOW_PAN = img->pWindow->m_isFloating ? 0.0 : CONTENT_PAN_X;
-            img->overviewBox      = CBox{img->pWindow->m_realPosition->value() - pMonitor->m_position - Vector2D{WINDOW_PAN, 0.0}, img->pWindow->m_realSize->value()};
-            img->overviewBox.translate(-VIEWPORT_CENTER).scale(scale->value()).translate(VIEWPORT_CENTER).translate(-viewOffset->value() * scale->value());
-            img->overviewBox.translate({0.F, yoff});
-            img->overviewBox = shrinkBox(img->overviewBox, WINDOW_GAP);
+            const auto WINDOW = windowForEntry(entry);
+            if (!WINDOW)
+                continue;
 
-            wimg->hitBox = boxUnion(wimg->hitBox, img->overviewBox);
+            const auto WINDOW_PAN = WINDOW->m_isFloating ? 0.0 : CONTENT_PAN_X;
+            const CBox BASE_BOX   = {WINDOW->m_realPosition->value() - pMonitor->m_position, WINDOW->m_realSize->value()};
+
+            CBox       rawOverviewBox = CBox{BASE_BOX.pos() - Vector2D{WINDOW_PAN, 0.0}, BASE_BOX.size()};
+            rawOverviewBox.translate(-VIEWPORT_CENTER).scale(scale->value()).translate(VIEWPORT_CENTER).translate(-viewOffset->value() * scale->value());
+            rawOverviewBox.translate({0.F, yoff});
+
+            entry->overviewBox    = rawOverviewBox;
+            entry->overviewBox    = shrinkBox(entry->overviewBox, WINDOW_GAP);
+            entry->liveRenderable = windowEntryRenderable(entry);
+            entry->liveVisible    = windowEntryVisible(entry);
+
+            workspaceEntry->hitBox = boxUnion(workspaceEntry->hitBox, entry->overviewBox);
         }
 
-        yoff += pMonitor->m_size.y * scale->value();
+        yoff += WORKSPACE_STEP;
     }
 
     buildInsertionMarkers();
 }
 
-SP<CScrollOverview::SWorkspaceImage> CScrollOverview::workspaceAt(const Vector2D& local) {
-    for (auto it = images.rbegin(); it != images.rend(); ++it) {
-        const auto& wimg = *it;
-        if (wimg && wimg->pWorkspace && wimg->hitBox.containsPoint(local))
-            return wimg;
+double CScrollOverview::overviewStyleProgress() const {
+    if (!scale)
+        return 1.0;
+
+    const double DEFAULT_ZOOM = std::clamp(sc<double>(g_hyprviewConfig.scrolling.defaultZoom), 0.1, 0.9);
+    const double RANGE        = 1.0 - DEFAULT_ZOOM;
+    if (RANGE <= 0.0)
+        return 1.0;
+
+    return std::clamp((1.0 - sc<double>(scale->value())) / RANGE, 0.0, 1.0);
+}
+
+SP<CScrollOverview::SWorkspaceEntry> CScrollOverview::workspaceAt(const Vector2D& local) {
+    for (auto it = workspaceEntries.rbegin(); it != workspaceEntries.rend(); ++it) {
+        const auto& workspaceEntry = *it;
+        if (workspaceEntry && workspaceEntry->pWorkspace && workspaceEntry->hitBox.containsPoint(local))
+            return workspaceEntry;
     }
 
     return nullptr;
 }
 
-SP<CScrollOverview::SWindowImage> CScrollOverview::windowAtExact(const Vector2D& local) {
-    for (auto wit = images.rbegin(); wit != images.rend(); ++wit) {
-        const auto& wimg = *wit;
-        if (!wimg || !wimg->hitBox.containsPoint(local))
+SP<CScrollOverview::SWindowEntry> CScrollOverview::windowAtExact(const Vector2D& local) {
+    for (auto wit = workspaceEntries.rbegin(); wit != workspaceEntries.rend(); ++wit) {
+        const auto& workspaceEntry = *wit;
+        if (!workspaceEntry || !workspaceEntry->hitBox.containsPoint(local))
             continue;
 
-        for (auto it = wimg->windowImages.rbegin(); it != wimg->windowImages.rend(); ++it) {
-            const auto& img = *it;
-            if (img && img->pWindow && img->overviewBox.containsPoint(local))
-                return img;
+        for (auto it = workspaceEntry->windowEntries.rbegin(); it != workspaceEntry->windowEntries.rend(); ++it) {
+            const auto& entry = *it;
+            if (entry && entry->pWindow && entry->liveVisible && entry->overviewBox.containsPoint(local))
+                return entry;
         }
     }
 
@@ -102,8 +127,8 @@ double CScrollOverview::distanceToBox(const Vector2D& point, const CBox& box) {
     return dx * dx + dy * dy;
 }
 
-CBox CScrollOverview::expandedWindowHitBox(const SP<SWindowImage>& image) const {
-    if (!image || image->overviewBox.empty())
+CBox CScrollOverview::expandedWindowHitBox(const SP<SWindowEntry>& image) const {
+    if (!image || !image->liveVisible || image->overviewBox.empty())
         return {};
 
     const double EXPANSION = std::max(0.0, sc<double>(g_hyprviewConfig.mouse.hitboxExpansion));
@@ -115,33 +140,33 @@ CBox CScrollOverview::expandedWindowHitBox(const SP<SWindowImage>& image) const 
     return box;
 }
 
-SP<CScrollOverview::SWindowImage> CScrollOverview::windowNear(const Vector2D& local) {
+SP<CScrollOverview::SWindowEntry> CScrollOverview::windowNear(const Vector2D& local) {
     if (g_hyprviewConfig.mouse.hitboxExpansion <= 0)
         return nullptr;
 
-    SP<SWindowImage> best;
+    SP<SWindowEntry> best;
     double           bestDistance = std::numeric_limits<double>::max();
 
-    for (auto wit = images.rbegin(); wit != images.rend(); ++wit) {
-        const auto& wimg = *wit;
-        if (!wimg)
+    for (auto wit = workspaceEntries.rbegin(); wit != workspaceEntries.rend(); ++wit) {
+        const auto& workspaceEntry = *wit;
+        if (!workspaceEntry)
             continue;
 
-        for (auto it = wimg->windowImages.rbegin(); it != wimg->windowImages.rend(); ++it) {
-            const auto& img = *it;
-            if (!img || !img->pWindow)
+        for (auto it = workspaceEntry->windowEntries.rbegin(); it != workspaceEntry->windowEntries.rend(); ++it) {
+            const auto& entry = *it;
+            if (!entry || !entry->pWindow || !entry->liveVisible)
                 continue;
 
-            const auto HITBOX = expandedWindowHitBox(img);
+            const auto HITBOX = expandedWindowHitBox(entry);
             if (HITBOX.empty() || !HITBOX.containsPoint(local))
                 continue;
 
             if (!g_hyprviewConfig.mouse.nearestHitbox)
-                return img;
+                return entry;
 
-            const auto DISTANCE = distanceToBox(local, img->overviewBox);
+            const auto DISTANCE = distanceToBox(local, entry->overviewBox);
             if (DISTANCE < bestDistance) {
-                best         = img;
+                best         = entry;
                 bestDistance = DISTANCE;
             }
         }
@@ -150,34 +175,27 @@ SP<CScrollOverview::SWindowImage> CScrollOverview::windowNear(const Vector2D& lo
     return best;
 }
 
-SP<CScrollOverview::SWindowImage> CScrollOverview::windowAt(const Vector2D& local) {
+SP<CScrollOverview::SWindowEntry> CScrollOverview::windowAt(const Vector2D& local) {
     if (auto exact = windowAtExact(local))
         return exact;
 
     return windowNear(local);
 }
 
-SP<CScrollOverview::SWorkspaceImage> CScrollOverview::imageForWorkspace(PHLWORKSPACE w) {
-    for (const auto& i : images) {
+SP<CScrollOverview::SWorkspaceEntry> CScrollOverview::workspaceEntryForWorkspace(PHLWORKSPACE w) {
+    for (const auto& i : workspaceEntries) {
         if (i->pWorkspace == w)
             return i;
     }
     return nullptr;
 }
 
-SP<CScrollOverview::SWindowImage> CScrollOverview::imageForWindow(PHLWINDOW w) const {
+SP<CScrollOverview::SWindowEntry> CScrollOverview::windowEntryForWindow(PHLWINDOW w) const {
     if (!w)
         return nullptr;
 
-    for (const auto& wimg : images) {
-        if (!wimg)
-            continue;
+    rebuildWindowEntryLookups();
 
-        for (const auto& img : wimg->windowImages) {
-            if (img && img->pWindow == w)
-                return img;
-        }
-    }
-
-    return nullptr;
+    const auto IT = rawWindowEntryLookup.find(w.get());
+    return IT == rawWindowEntryLookup.end() ? nullptr : IT->second;
 }

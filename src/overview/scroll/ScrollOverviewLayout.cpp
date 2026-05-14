@@ -1,4 +1,5 @@
 #include "ScrollOverview.hpp"
+#include "../../plugin/HyprviewConfig.hpp"
 #include <algorithm>
 #include <any>
 #include <cmath>
@@ -28,12 +29,12 @@
 #include <hyprland/src/config/shared/complex/ComplexDataTypes.hpp>
 
 bool CScrollOverview::moveViewportWorkspace(bool up) {
-    if (images.empty())
+    if (workspaceEntries.empty())
         return false;
 
     if (viewportCurrentWorkspace == 0 && !up)
         return false;
-    if (viewportCurrentWorkspace == images.size() - 1 && up)
+    if (viewportCurrentWorkspace == workspaceEntries.size() - 1 && up)
         return false;
 
     if (up)
@@ -43,23 +44,51 @@ bool CScrollOverview::moveViewportWorkspace(bool up) {
 }
 
 bool CScrollOverview::setViewportWorkspace(size_t index, bool warp, bool activate) {
-    if (images.empty())
+    if (workspaceEntries.empty())
         return false;
 
-    index = std::clamp(index, static_cast<size_t>(0), images.size() - 1);
+    index = std::clamp(index, static_cast<size_t>(0), workspaceEntries.size() - 1);
     return setViewportOffset({0.0, viewOffsetForWorkspaceIndex(index)}, warp, activate);
 }
 
-bool CScrollOverview::focusWorkspaceInViewport(SP<SWorkspaceImage> workspace, bool warp, bool activate) {
+bool CScrollOverview::focusWorkspaceInViewport(SP<SWorkspaceEntry> workspace, bool warp, bool activate) {
     if (!workspace)
         return false;
 
-    for (size_t i = 0; i < images.size(); ++i) {
-        if (images[i] == workspace)
+    for (size_t i = 0; i < workspaceEntries.size(); ++i) {
+        if (workspaceEntries[i] == workspace)
             return setViewportWorkspace(i, warp, activate);
     }
 
     return false;
+}
+
+bool CScrollOverview::reanchorViewportToWorkspace(PHLWORKSPACE workspace, bool preserveVisualOffset) {
+    if (!workspace || workspaceEntries.empty() || !viewOffset)
+        return false;
+
+    const auto INDEX = workspaceEntryIndex(workspace);
+    if (!INDEX)
+        return false;
+
+    Vector2D offset = {};
+    if (preserveVisualOffset) {
+        const auto OLD_ANCHOR_INDEX = activeWorkspaceEntryIndex();
+        offset                      = viewOffset->value();
+        offset.y += (sc<double>(OLD_ANCHOR_INDEX) - sc<double>(*INDEX)) * workspaceOverviewStep();
+    }
+
+    startedOn = workspace;
+
+    if (preserveVisualOffset) {
+        viewOffset->setValueAndWarp(clampedViewOffset(offset));
+        syncViewportWorkspaceFromOffset(viewOffset->value());
+    } else {
+        viewportCurrentWorkspace = *INDEX;
+        viewOffset->setValueAndWarp({});
+    }
+
+    return true;
 }
 
 bool CScrollOverview::moveViewportBy(double deltaY, bool warp, bool activate) {
@@ -96,21 +125,21 @@ bool CScrollOverview::setViewportOffset(Vector2D offset, bool warp, bool activat
 }
 
 void CScrollOverview::syncViewportWorkspaceFromOffset(const Vector2D& offset) {
-    if (!pMonitor || images.empty())
+    if (!pMonitor || workspaceEntries.empty())
         return;
 
-    const auto ACTIVE_INDEX = activeWorkspaceImageIndex();
-    const auto REL_INDEX    = offset.y / pMonitor->m_size.y + sc<double>(ACTIVE_INDEX);
+    const auto ACTIVE_INDEX = activeWorkspaceEntryIndex();
+    const auto REL_INDEX    = offset.y / workspaceOverviewStep() + sc<double>(ACTIVE_INDEX);
     const auto INDEX        = sc<int64_t>(std::llround(REL_INDEX));
 
-    viewportCurrentWorkspace = sc<size_t>(std::clamp<int64_t>(INDEX, 0, sc<int64_t>(images.size() - 1)));
+    viewportCurrentWorkspace = sc<size_t>(std::clamp<int64_t>(INDEX, 0, sc<int64_t>(workspaceEntries.size() - 1)));
 }
 
 void CScrollOverview::activateViewportWorkspace() {
-    if (!pMonitor || images.empty() || viewportCurrentWorkspace >= images.size())
+    if (!pMonitor || workspaceEntries.empty() || viewportCurrentWorkspace >= workspaceEntries.size())
         return;
 
-    const auto WORKSPACE = images[viewportCurrentWorkspace] ? images[viewportCurrentWorkspace]->pWorkspace : PHLWORKSPACE{};
+    const auto WORKSPACE = workspaceEntries[viewportCurrentWorkspace] ? workspaceEntries[viewportCurrentWorkspace]->pWorkspace : PHLWORKSPACE{};
     activateWorkspace(WORKSPACE);
 }
 
@@ -121,21 +150,31 @@ void CScrollOverview::activateWorkspace(PHLWORKSPACE workspace, bool focus) {
     pMonitor->changeWorkspace(workspace, false, true, !focus);
 }
 
-double CScrollOverview::viewOffsetForWorkspaceIndex(size_t index) const {
-    if (!pMonitor || images.empty())
+double CScrollOverview::workspaceOverviewStep() const {
+    if (!pMonitor)
         return 0.0;
 
-    const auto ACTIVE_INDEX = activeWorkspaceImageIndex();
-    return (sc<double>(index) - sc<double>(ACTIVE_INDEX)) * pMonitor->m_size.y;
+    const double SCALE         = std::max(sc<double>(scale->value()), 0.001);
+    const double WORKSPACE_GAP = std::max(0.0, sc<double>(g_hyprviewConfig.scrolling.workspaceGap)) * overviewStyleProgress();
+    return pMonitor->m_size.y + WORKSPACE_GAP / SCALE;
+}
+
+double CScrollOverview::viewOffsetForWorkspaceIndex(size_t index) const {
+    if (!pMonitor || workspaceEntries.empty())
+        return 0.0;
+
+    const auto ACTIVE_INDEX = activeWorkspaceEntryIndex();
+    return (sc<double>(index) - sc<double>(ACTIVE_INDEX)) * workspaceOverviewStep();
 }
 
 Vector2D CScrollOverview::clampedViewOffset(Vector2D offset) const {
-    if (!pMonitor || images.empty())
+    if (!pMonitor || workspaceEntries.empty())
         return offset;
 
-    const auto ACTIVE_INDEX = activeWorkspaceImageIndex();
-    const auto MIN_Y        = -sc<double>(ACTIVE_INDEX) * pMonitor->m_size.y;
-    const auto MAX_Y        = sc<double>(images.size() - 1 - ACTIVE_INDEX) * pMonitor->m_size.y;
+    const auto ACTIVE_INDEX = activeWorkspaceEntryIndex();
+    const auto STEP         = workspaceOverviewStep();
+    const auto MIN_Y        = -sc<double>(ACTIVE_INDEX) * STEP;
+    const auto MAX_Y        = sc<double>(workspaceEntries.size() - 1 - ACTIVE_INDEX) * STEP;
 
     offset.x = 0.0;
     offset.y = std::clamp(offset.y, MIN_Y, MAX_Y);

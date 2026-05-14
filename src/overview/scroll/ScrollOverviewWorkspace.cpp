@@ -1,4 +1,5 @@
 #include "ScrollOverview.hpp"
+#include "../../plugin/Telemetry.hpp"
 #include <algorithm>
 #include <any>
 #include <cmath>
@@ -36,6 +37,12 @@ static void             damageOverviewForPan(WP<Hyprutils::Animation::CBaseAnima
         g_pOverview->damage();
 }
 
+namespace {
+    std::string workspaceID(PHLWORKSPACE workspace) {
+        return workspace ? std::to_string(workspace->m_id) : "<none>";
+    }
+}
+
 CBox CScrollOverview::boxUnion(const CBox& a, const CBox& b) {
     if (a.empty())
         return b;
@@ -61,41 +68,56 @@ bool CScrollOverview::workspaceUsesScrollingLayout(PHLWORKSPACE workspace) const
     return Layout::Supplementary::algoMatcher()->getNameForTiledAlgo(&typeid(*TILED_ALGO.get())) == "scrolling";
 }
 
-CScrollOverview::SWorkspacePanRange CScrollOverview::horizontalPanRangeForWorkspace(const SP<SWorkspaceImage>& workspace) const {
+CScrollOverview::SWorkspacePanRange CScrollOverview::horizontalPanRangeForWorkspace(const SP<SWorkspaceEntry>& workspace) const {
     if (!pMonitor || !workspace || !workspaceUsesScrollingLayout(workspace->pWorkspace))
         return {};
 
-    bool   foundTiled = false;
-    double minX       = 0.0;
-    double maxX       = 0.0;
+    bool   foundTiled   = false;
+    double minX         = 0.0;
+    double maxX         = 0.0;
+    double minCenterPan = 0.0;
+    double maxCenterPan = 0.0;
 
-    for (const auto& img : workspace->windowImages) {
-        if (!img || !img->pWindow || img->pWindow->m_isFloating)
+    for (const auto& entry : workspace->windowEntries) {
+        if (!entry || !entry->pWindow || entry->pWindow->m_isFloating)
             continue;
 
-        const auto POS  = img->pWindow->m_realPosition->goal() - pMonitor->m_position;
-        const auto SIZE = img->pWindow->m_realSize->goal();
+        const auto   POS        = entry->pWindow->m_realPosition->goal() - pMonitor->m_position;
+        const auto   SIZE       = entry->pWindow->m_realSize->goal();
+        const double CENTER_PAN = POS.x + SIZE.x / 2.0 - pMonitor->m_size.x / 2.0;
 
         if (!foundTiled) {
-            minX       = POS.x;
-            maxX       = POS.x + SIZE.x;
-            foundTiled = true;
+            minX         = POS.x;
+            maxX         = POS.x + SIZE.x;
+            minCenterPan = CENTER_PAN;
+            maxCenterPan = CENTER_PAN;
+            foundTiled   = true;
         } else {
-            minX = std::min(minX, POS.x);
-            maxX = std::max(maxX, POS.x + SIZE.x);
+            minX         = std::min(minX, POS.x);
+            maxX         = std::max(maxX, POS.x + SIZE.x);
+            minCenterPan = std::min(minCenterPan, CENTER_PAN);
+            maxCenterPan = std::max(maxCenterPan, CENTER_PAN);
         }
     }
 
     if (!foundTiled)
         return {};
 
+    double minPan = std::min(0.0, minX);
+    double maxPan = std::max(0.0, maxX - pMonitor->m_size.x);
+
+    if (maxPan - minPan > 0.5) {
+        minPan = std::min(minPan, minCenterPan);
+        maxPan = std::max(maxPan, maxCenterPan);
+    }
+
     return {
-        .min = std::min(0.0, minX),
-        .max = std::max(0.0, maxX - pMonitor->m_size.x),
+        .min = minPan,
+        .max = maxPan,
     };
 }
 
-double CScrollOverview::horizontalPanForWorkspace(const SP<SWorkspaceImage>& workspace) const {
+double CScrollOverview::horizontalPanForWorkspace(const SP<SWorkspaceEntry>& workspace) const {
     if (!workspace || !workspace->pWorkspace)
         return 0.0;
 
@@ -107,9 +129,14 @@ double CScrollOverview::horizontalPanForWorkspace(const SP<SWorkspaceImage>& wor
     return std::clamp(sc<double>(IT->second->value()), RANGE.min, RANGE.max);
 }
 
-bool CScrollOverview::setHorizontalPanForWorkspace(const SP<SWorkspaceImage>& workspace, double pan, bool animate) {
-    if (!workspace || !workspace->pWorkspace || !workspaceUsesScrollingLayout(workspace->pWorkspace))
+bool CScrollOverview::setHorizontalPanForWorkspace(const SP<SWorkspaceEntry>& workspace, double pan, bool animate) {
+    if (!workspace || !workspace->pWorkspace || !workspaceUsesScrollingLayout(workspace->pWorkspace)) {
+        Hyprview::telemetryLogLazy([&] {
+            return std::format("event=pan-set-skip reason=invalid-or-not-scrolling workspace={} requestedPan={:.2f} animate={}",
+                               workspaceID(workspace ? workspace->pWorkspace : PHLWORKSPACE{}), pan, Hyprview::boolToken(animate));
+        });
         return false;
+    }
 
     const auto RANGE   = horizontalPanRangeForWorkspace(workspace);
     const auto CLAMPED = std::clamp(pan, RANGE.min, RANGE.max);
@@ -123,8 +150,16 @@ bool CScrollOverview::setHorizontalPanForWorkspace(const SP<SWorkspaceImage>& wo
 
     const auto CURRENT = sc<double>(ANIM->value());
 
-    if (std::abs(CURRENT - CLAMPED) < 0.5)
+    Hyprview::telemetryLogLazy([&] {
+        return std::format("event=pan-set workspace={} requestedPan={:.2f} clampedPan={:.2f} currentPan={:.2f} range={:.2f},{:.2f} animate={}", workspaceID(workspace->pWorkspace),
+                           pan, CLAMPED, CURRENT, RANGE.min, RANGE.max, Hyprview::boolToken(animate));
+    });
+
+    if (std::abs(CURRENT - CLAMPED) < 0.5) {
+        Hyprview::telemetryLogLazy(
+            [&] { return std::format("event=pan-set-skip reason=noop workspace={} currentPan={:.2f} clampedPan={:.2f}", workspaceID(workspace->pWorkspace), CURRENT, CLAMPED); });
         return false;
+    }
 
     if (animate)
         *ANIM = sc<float>(CLAMPED);
@@ -140,7 +175,7 @@ bool CScrollOverview::setHorizontalPanForWorkspace(const SP<SWorkspaceImage>& wo
 
 void CScrollOverview::pruneWorkspaceContentPans() {
     std::erase_if(workspaceContentPan, [this](const auto& entry) {
-        return !std::ranges::any_of(images, [&entry](const auto& image) { return image && image->pWorkspace && image->pWorkspace->m_id == entry.first; });
+        return !std::ranges::any_of(workspaceEntries, [&entry](const auto& image) { return image && image->pWorkspace && image->pWorkspace->m_id == entry.first; });
     });
 }
 
@@ -222,11 +257,11 @@ std::vector<WORKSPACEID> CScrollOverview::appendWorkspaceInsertionIDs() const {
 
     WORKSPACEID lastNumericWorkspace = WORKSPACE_INVALID;
 
-    for (const auto& wimg : images) {
-        if (!wimg || !wimg->pWorkspace || wimg->pWorkspace->m_id <= 0)
+    for (const auto& workspaceEntry : workspaceEntries) {
+        if (!workspaceEntry || !workspaceEntry->pWorkspace || workspaceEntry->pWorkspace->m_id <= 0)
             continue;
 
-        lastNumericWorkspace = std::max(lastNumericWorkspace, wimg->pWorkspace->m_id);
+        lastNumericWorkspace = std::max(lastNumericWorkspace, workspaceEntry->pWorkspace->m_id);
     }
 
     if (lastNumericWorkspace == WORKSPACE_INVALID)
@@ -243,7 +278,7 @@ std::vector<WORKSPACEID> CScrollOverview::appendWorkspaceInsertionIDs() const {
 void CScrollOverview::buildInsertionMarkers() {
     insertionMarkers.clear();
 
-    if (!pMonitor || images.empty())
+    if (!pMonitor || workspaceEntries.empty())
         return;
 
     auto addMarkerGroup = [this](const CBox& referenceBox, double centerY, const std::vector<WORKSPACEID>& ids) {
@@ -269,18 +304,18 @@ void CScrollOverview::buildInsertionMarkers() {
         }
     };
 
-    std::vector<SP<SWorkspaceImage>> numericImages;
-    for (const auto& wimg : images) {
-        if (wimg && wimg->pWorkspace && wimg->pWorkspace->m_id > 0)
-            numericImages.emplace_back(wimg);
+    std::vector<SP<SWorkspaceEntry>> numericEntries;
+    for (const auto& workspaceEntry : workspaceEntries) {
+        if (workspaceEntry && workspaceEntry->pWorkspace && workspaceEntry->pWorkspace->m_id > 0)
+            numericEntries.emplace_back(workspaceEntry);
     }
 
-    if (numericImages.empty())
+    if (numericEntries.empty())
         return;
 
-    for (size_t i = 0; i + 1 < numericImages.size(); ++i) {
-        const auto& BEFORE = numericImages[i];
-        const auto& AFTER  = numericImages[i + 1];
+    for (size_t i = 0; i + 1 < numericEntries.size(); ++i) {
+        const auto& BEFORE = numericEntries[i];
+        const auto& AFTER  = numericEntries[i + 1];
         const auto  IDS    = validWorkspaceInsertionIDs(BEFORE->pWorkspace, AFTER->pWorkspace);
         const auto  MID_Y  = (BEFORE->overviewBox.y + BEFORE->overviewBox.h + AFTER->overviewBox.y) / 2.0;
 
@@ -289,7 +324,7 @@ void CScrollOverview::buildInsertionMarkers() {
 
     const auto APPEND_IDS = appendWorkspaceInsertionIDs();
     if (!APPEND_IDS.empty()) {
-        const auto& LAST = numericImages.back();
+        const auto& LAST = numericEntries.back();
         addMarkerGroup(LAST->overviewBox, LAST->overviewBox.y + LAST->overviewBox.h - INSERTION_MARKER_HEIGHT / 2.0 - 24.0, APPEND_IDS);
     }
 }
@@ -310,21 +345,21 @@ PHLWORKSPACE CScrollOverview::workspaceForDropTarget(const SDropTarget& target) 
     return g_pCompositor->createNewWorkspace(target.targetWorkspaceID, pMonitor->m_id, "", false);
 }
 
-std::optional<size_t> CScrollOverview::workspaceImageIndex(PHLWORKSPACE workspace) const {
+std::optional<size_t> CScrollOverview::workspaceEntryIndex(PHLWORKSPACE workspace) const {
     if (!workspace)
         return std::nullopt;
 
-    for (size_t i = 0; i < images.size(); ++i) {
-        if (images[i] && images[i]->pWorkspace == workspace)
+    for (size_t i = 0; i < workspaceEntries.size(); ++i) {
+        if (workspaceEntries[i] && workspaceEntries[i]->pWorkspace == workspace)
             return i;
     }
 
     return std::nullopt;
 }
 
-size_t CScrollOverview::activeWorkspaceImageIndex() const {
-    for (size_t i = 0; i < images.size(); ++i) {
-        if (images[i]->pWorkspace && images[i]->pWorkspace == startedOn)
+size_t CScrollOverview::activeWorkspaceEntryIndex() const {
+    for (size_t i = 0; i < workspaceEntries.size(); ++i) {
+        if (workspaceEntries[i]->pWorkspace && workspaceEntries[i]->pWorkspace == startedOn)
             return i;
     }
 

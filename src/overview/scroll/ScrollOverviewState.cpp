@@ -1,4 +1,5 @@
 #include "ScrollOverview.hpp"
+#include "../../plugin/Telemetry.hpp"
 #include <algorithm>
 #include <any>
 #include <cmath>
@@ -19,26 +20,50 @@
 
 static constexpr uint64_t FOCUS_CURSOR_SYNC_MS = 220;
 
-void                      CScrollOverview::refreshWorkspaceImages(PHLWORKSPACE preferredViewport, bool warpViewport) {
+namespace {
+    std::string workspaceID(PHLWORKSPACE workspace) {
+        return workspace ? std::to_string(workspace->m_id) : "<none>";
+    }
+}
+
+void CScrollOverview::refreshWorkspaceEntries(PHLWORKSPACE preferredViewport, bool warpViewport) {
     if (!pMonitor)
         return;
 
-    const auto FALLBACK_VIEWPORT =
-        !preferredViewport && viewportCurrentWorkspace < images.size() && images[viewportCurrentWorkspace] ? images[viewportCurrentWorkspace]->pWorkspace : PHLWORKSPACE{};
+    const auto FALLBACK_VIEWPORT = !preferredViewport && viewportCurrentWorkspace < workspaceEntries.size() && workspaceEntries[viewportCurrentWorkspace] ?
+        workspaceEntries[viewportCurrentWorkspace]->pWorkspace :
+        PHLWORKSPACE{};
 
-    images.clear();
+    Hyprview::telemetryLogLazy([&] {
+        return std::format("event=refresh-workspaces-start preferred={} fallback={} warp={} oldImages={} viewportIndex={} activeWorkspace={}", workspaceID(preferredViewport),
+                           workspaceID(FALLBACK_VIEWPORT), Hyprview::boolToken(warpViewport), workspaceEntries.size(), viewportCurrentWorkspace,
+                           workspaceID(pMonitor->m_activeWorkspace));
+    });
+
+    invalidateWindowEntryLookups();
+    workspaceEntries.clear();
 
     for (const auto& w : g_pCompositor->getWorkspaces()) {
         if (w && w->m_monitor == pMonitor && !w->m_isSpecialWorkspace && workspaceVisibleInOverview(w.lock()))
-            images.emplace_back(makeShared<SWorkspaceImage>(w.lock()));
+            workspaceEntries.emplace_back(makeShared<SWorkspaceEntry>(w.lock()));
     }
 
-    std::sort(images.begin(), images.end(), [](const auto& a, const auto& b) { return a->pWorkspace->m_id < b->pWorkspace->m_id; });
+    std::sort(workspaceEntries.begin(), workspaceEntries.end(), [](const auto& a, const auto& b) { return a->pWorkspace->m_id < b->pWorkspace->m_id; });
     pruneWorkspaceContentPans();
 
-    refreshingWorkspaceImages = true;
-    redrawAll();
-    refreshingWorkspaceImages = false;
+    for (size_t i = 0; i < workspaceEntries.size(); ++i) {
+        const auto& ENTRY = workspaceEntries[i];
+        Hyprview::telemetryLogLazy([&] {
+            return std::format("event=refresh-workspace-image index={} workspace={} name={} displayable={} scrolling={}", i,
+                               workspaceID(ENTRY ? ENTRY->pWorkspace : PHLWORKSPACE{}), ENTRY && ENTRY->pWorkspace ? ENTRY->pWorkspace->m_name : "<none>",
+                               Hyprview::boolToken(ENTRY && workspaceHasDisplayableWindows(ENTRY->pWorkspace)),
+                               Hyprview::boolToken(ENTRY && workspaceUsesScrollingLayout(ENTRY->pWorkspace)));
+        });
+    }
+
+    refreshingWorkspaceEntries = true;
+    rebuildAllWorkspaceEntries();
+    refreshingWorkspaceEntries = false;
     rebuildGeometryCache();
     syncSelectionToViewport(false);
 
@@ -47,14 +72,14 @@ void                      CScrollOverview::refreshWorkspaceImages(PHLWORKSPACE p
     bool       movedViewport      = false;
     const bool NORMALIZE_ANCHOR   = VIEWPORT_WORKSPACE && !warpViewport && pMonitor->m_activeWorkspace == VIEWPORT_WORKSPACE;
     if (VIEWPORT_WORKSPACE) {
-        if (const auto INDEX = workspaceImageIndex(VIEWPORT_WORKSPACE); INDEX) {
+        if (const auto INDEX = workspaceEntryIndex(VIEWPORT_WORKSPACE); INDEX) {
             if (NORMALIZE_ANCHOR)
                 queueViewportAnchorNormalization(VIEWPORT_WORKSPACE);
 
             movedViewport     = setViewportWorkspace(*INDEX, warpViewport);
             centeredPreferred = true;
-        } else if (!images.empty())
-            movedViewport = setViewportWorkspace(std::min(viewportCurrentWorkspace, images.size() - 1), true);
+        } else if (!workspaceEntries.empty())
+            movedViewport = setViewportWorkspace(std::min(viewportCurrentWorkspace, workspaceEntries.size() - 1), true);
     }
 
     if (centeredPreferred && NORMALIZE_ANCHOR) {
@@ -62,10 +87,20 @@ void                      CScrollOverview::refreshWorkspaceImages(PHLWORKSPACE p
             normalizeViewportAnchor(VIEWPORT_WORKSPACE);
     }
 
+    Hyprview::telemetryLogLazy([&] {
+        return std::format(
+            "event=refresh-workspaces-end workspaceEntries={} viewportIndex={} viewportWorkspace={} viewOffset={} centeredPreferred={} movedViewport={} "
+            "normalizeAnchor={}",
+            workspaceEntries.size(), viewportCurrentWorkspace,
+            workspaceID(viewportCurrentWorkspace < workspaceEntries.size() && workspaceEntries[viewportCurrentWorkspace] ? workspaceEntries[viewportCurrentWorkspace]->pWorkspace :
+                                                                                                                           PHLWORKSPACE{}),
+            Hyprview::formatVector(viewOffset->value()), Hyprview::boolToken(centeredPreferred), Hyprview::boolToken(movedViewport), Hyprview::boolToken(NORMALIZE_ANCHOR));
+    });
+
     damage();
 }
 
-void CScrollOverview::queueRefreshWorkspaceImages(PHLWORKSPACE preferredViewport, bool warpViewport) {
+void CScrollOverview::queueRefreshWorkspaceEntries(PHLWORKSPACE preferredViewport, bool warpViewport) {
     if (closing)
         return;
 
@@ -97,7 +132,7 @@ void CScrollOverview::queueRefreshWorkspaceImages(PHLWORKSPACE preferredViewport
         SCROLL->queuedRefreshWorkspace.reset();
         SCROLL->queuedRefreshWarp = true;
 
-        SCROLL->refreshWorkspaceImages(PREFERRED, WARP);
+        SCROLL->refreshWorkspaceEntries(PREFERRED, WARP);
         SCROLL->highlightHoverDebug(false);
     });
 }
@@ -129,7 +164,7 @@ void CScrollOverview::normalizeViewportAnchor(PHLWORKSPACE workspace) {
     if (!workspace || !pMonitor || closing || workspace != pMonitor->m_activeWorkspace)
         return;
 
-    const auto INDEX = workspaceImageIndex(workspace);
+    const auto INDEX = workspaceEntryIndex(workspace);
     if (!INDEX || viewportCurrentWorkspace != *INDEX)
         return;
 
@@ -164,21 +199,21 @@ void CScrollOverview::queueFocusedWindowCursorSync(PHLWINDOW window) {
 
         const auto WINDOW        = SCROLL->queuedCursorWindow.lock();
         SCROLL->cursorSyncQueued = false;
-        SCROLL->centerCursorOnWindowImage(WINDOW);
+        SCROLL->centerCursorOnWindowEntry(WINDOW);
     });
 }
 
-bool CScrollOverview::centerCursorOnWindowImage(PHLWINDOW window) {
+bool CScrollOverview::centerCursorOnWindowEntry(PHLWINDOW window) {
     if (!window || !pMonitor || closing || inputState.mode != ePointerMode::IDLE || !window->m_workspace || window->m_workspace->m_monitor != pMonitor)
         return false;
 
     rebuildGeometryCache();
 
-    const auto IMAGE = imageForWindow(window);
-    if (!IMAGE)
+    const auto ENTRY = windowEntryForWindow(window);
+    if (!ENTRY)
         return false;
 
-    const auto TARGET = pMonitor->m_position + IMAGE->overviewBox.middle();
+    const auto TARGET = pMonitor->m_position + ENTRY->overviewBox.middle();
     if (TARGET.distance(g_pInputManager->getMouseCoordsInternal()) >= 0.5) {
         cursorSyncWarping = true;
         g_pCompositor->warpCursorTo(TARGET);
@@ -208,34 +243,17 @@ void CScrollOverview::onDamageReported() {
     if (!pMonitor || closing)
         return;
 
-    bool marked = false;
-    for (const auto& wimg : images) {
-        if (!wimg)
-            continue;
-
-        for (const auto& img : wimg->windowImages) {
-            if (!img || !windowImageRenderable(img->pWindow.lock()))
-                continue;
-
-            img->dirty = true;
-            marked     = true;
-        }
-    }
-
-    if (marked) {
-        damageDirty = true;
-        damage();
-        g_pCompositor->scheduleFrameForMonitor(pMonitor.lock());
-    }
+    damage();
+    g_pCompositor->scheduleFrameForMonitor(pMonitor.lock());
 }
 
 void CScrollOverview::onDamageReported(const CRegion& damageRegion) {
     if (!pMonitor || closing)
         return;
 
-    if (markDirtyWindowImagesForDamage(damageRegion)) {
-        damageDirty = true;
-        damage();
-        g_pCompositor->scheduleFrameForMonitor(pMonitor.lock());
-    }
+    if (damageRegion.empty())
+        return;
+
+    damage();
+    g_pCompositor->scheduleFrameForMonitor(pMonitor.lock());
 }

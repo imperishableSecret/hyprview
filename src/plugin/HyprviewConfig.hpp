@@ -6,7 +6,9 @@
 struct SHyprviewScrollingConfig {
     bool        scrollMovesUpDown           = true;
     int         windowGap                   = 0;
+    int         workspaceGap                = 0;
     bool        backgroundBlur              = false;
+    bool        showWorkspaceLayers         = true;
     int64_t     backdropColor               = 0xFF000000;
     int64_t     workspaceShadowColor        = 0x00000000;
     int         workspaceShadowSize         = 0;
@@ -54,11 +56,17 @@ struct SHyprviewMouseConfig {
     int   snapPanZone         = 96;
 };
 
+struct SHyprviewDebugConfig {
+    bool        telemetry     = false;
+    std::string telemetryPath = "/tmp/hyprview-telemetry.log";
+};
+
 struct SHyprviewConfig {
     int                      gestureDistance = 200;
     SHyprviewScrollingConfig scrolling;
     SHyprviewKeyboardConfig  keyboard;
     SHyprviewMouseConfig     mouse;
+    SHyprviewDebugConfig     debug;
 };
 
 inline auto g_hyprviewConfig = SHyprviewConfig{};

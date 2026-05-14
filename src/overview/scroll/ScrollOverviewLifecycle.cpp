@@ -4,6 +4,9 @@
 #include <any>
 #include <cmath>
 #include <linux/input-event-codes.h>
+#include <wayland-server-core.h>
+#include <wlr-layer-shell-unstable-v1.hpp>
+#include <hyprutils/utils/ScopeGuard.hpp>
 
 #define private   public
 #define protected public
@@ -36,7 +39,16 @@ static void damageMonitor(WP<Hyprutils::Animation::CBaseAnimatedVariable> thispt
 }
 
 static void removeOverview(WP<Hyprutils::Animation::CBaseAnimatedVariable> thisptr) {
+    const auto OVERVIEW = g_pOverview;
+    const auto MONITOR  = OVERVIEW && OVERVIEW->pMonitor ? OVERVIEW->pMonitor.lock() : PHLMONITOR{};
+
+    g_pHyprRenderer->m_renderPass.removeAllOfType("COverviewPassElement");
     g_pOverview.reset();
+
+    if (MONITOR) {
+        g_pHyprRenderer->damageMonitor(MONITOR);
+        g_pCompositor->scheduleFrameForMonitor(MONITOR);
+    }
 }
 
 static float hyprlerp(const float& from, const float& to, const float perc) {
@@ -47,9 +59,20 @@ static Vector2D hyprlerp(const Vector2D& from, const Vector2D& to, const float p
     return Vector2D{hyprlerp(from.x, to.x, perc), hyprlerp(from.y, to.y, perc)};
 }
 
+static bool focusReasonShouldSyncSelection(Desktop::eFocusReason reason) {
+    return Desktop::isHardInputFocusReason(reason) || reason == Desktop::FOCUS_REASON_SWITCH_TO_WINDOW_SOFT || reason == Desktop::FOCUS_REASON_DISPATCH_FOCUSWINDOW ||
+        reason == Desktop::FOCUS_REASON_GROUP_CURRENT_WINDOW_CHANGE || reason == Desktop::FOCUS_REASON_DISPATCH_MOVEWINDOWINTOGROUP;
+}
+
 CScrollOverview::~CScrollOverview() {
     g_pHyprOpenGL->makeEGLCurrent();
-    images.clear(); // otherwise we get a vram leak
+    if (realtimePreviewTimer) {
+        wl_event_source_remove(realtimePreviewTimer);
+        realtimePreviewTimer = nullptr;
+    }
+    workspaceEntries.clear(); // otherwise we get a vram leak
+    restoreForcedSurfaceVisibility();
+    restoreForcedWindowVisibility();
     Cursor::overrideController->unsetOverride(Cursor::CURSOR_OVERRIDE_SPECIAL_ACTION);
 }
 
@@ -57,12 +80,14 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
     const auto PMONITOR = Desktop::focusState()->monitor();
     pMonitor            = PMONITOR;
 
+    realtimePreviewTimer = wl_event_loop_add_timer(g_pCompositor->m_wlEventLoop, realtimePreviewTimerCallback, this);
+
     for (const auto& w : g_pCompositor->getWorkspaces()) {
         if (w && w->m_monitor == pMonitor && !w->m_isSpecialWorkspace && workspaceVisibleInOverview(w.lock()))
-            images.emplace_back(makeShared<SWorkspaceImage>(w.lock()));
+            workspaceEntries.emplace_back(makeShared<SWorkspaceEntry>(w.lock()));
     }
 
-    std::sort(images.begin(), images.end(), [](const auto& a, const auto& b) { return a->pWorkspace->m_id < b->pWorkspace->m_id; });
+    std::sort(workspaceEntries.begin(), workspaceEntries.end(), [](const auto& a, const auto& b) { return a->pWorkspace->m_id < b->pWorkspace->m_id; });
 
     g_pAnimationManager->createAnimation(1.F, scale, Config::animationTree()->getAnimationPropertyConfig("windowsMove"), AVARDAMAGE_NONE);
     g_pAnimationManager->createAnimation({}, viewOffset, Config::animationTree()->getAnimationPropertyConfig("windowsMove"), AVARDAMAGE_NONE);
@@ -79,18 +104,24 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
         if (closing)
             return;
 
+        const auto LOCAL = g_pInputManager->getMouseCoordsInternal() - pMonitor->m_position;
+        if (pointerOverBlockingLayerSurface(LOCAL)) {
+            lastMousePosLocal = LOCAL;
+            return;
+        }
+
         info.cancelled = true;
 
         if (!cursorSyncWarping && cursorSyncUntilMs != 0 && inputState.mode == ePointerMode::IDLE) {
             const auto NOW = Time::millis(Time::steadyNow());
             if (NOW <= cursorSyncUntilMs) {
-                if (const auto WINDOW = queuedCursorWindow.lock(); centerCursorOnWindowImage(WINDOW))
+                if (const auto WINDOW = queuedCursorWindow.lock(); centerCursorOnWindowEntry(WINDOW))
                     return;
             } else
                 clearFocusedWindowCursorSync();
         }
 
-        lastMousePosLocal = g_pInputManager->getMouseCoordsInternal() - pMonitor->m_position;
+        lastMousePosLocal = LOCAL;
         handlePointerMotion(lastMousePosLocal);
     };
 
@@ -98,7 +129,14 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
         if (closing)
             return;
 
-        info.cancelled = true;
+        const auto LOCAL = g_pInputManager->getMouseCoordsInternal() - pMonitor->m_position;
+        if (pointerOverBlockingLayerSurface(LOCAL)) {
+            lastMousePosLocal = LOCAL;
+            return;
+        }
+
+        info.cancelled    = true;
+        lastMousePosLocal = LOCAL;
 
         if (e.state == WL_POINTER_BUTTON_STATE_PRESSED)
             handlePointerPress(e.button);
@@ -110,7 +148,14 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
         if (closing)
             return;
 
-        info.cancelled = true;
+        const auto LOCAL = g_pInputManager->getMouseCoordsInternal() - pMonitor->m_position;
+        if (pointerOverBlockingLayerSurface(LOCAL)) {
+            lastMousePosLocal = LOCAL;
+            return;
+        }
+
+        info.cancelled    = true;
+        lastMousePosLocal = LOCAL;
         handlePointerAxis(e);
     };
 
@@ -118,7 +163,7 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
         if (closing)
             return;
 
-        queueRefreshWorkspaceImages(window && window->m_workspace ? window->m_workspace : (pMonitor ? pMonitor->m_activeWorkspace : nullptr), warpViewport);
+        queueRefreshWorkspaceEntries(window && window->m_workspace ? window->m_workspace : (pMonitor ? pMonitor->m_activeWorkspace : nullptr), warpViewport);
     };
 
     auto onWindowOpen  = [refreshForWindow](PHLWINDOW window) { refreshForWindow(window, true); };
@@ -129,25 +174,25 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
             return;
 
         if (workspace->m_monitor == pMonitor || (window && window->m_monitor == pMonitor))
-            queueRefreshWorkspaceImages(workspace, false);
+            queueRefreshWorkspaceEntries(workspace, false);
     };
 
     auto onWindowActive = [this](PHLWINDOW window, Desktop::eFocusReason reason) {
         if (closing || !pMonitor || inputState.mode != ePointerMode::IDLE || !window || !window->m_workspace || window->m_workspace->m_monitor != pMonitor)
             return;
 
-        if (reason != Desktop::FOCUS_REASON_KEYBIND)
+        if (!focusReasonShouldSyncSelection(reason))
             return;
 
         rebuildGeometryCache();
 
-        if (images.empty() || viewportCurrentWorkspace >= images.size() || !images[viewportCurrentWorkspace]) {
+        if (workspaceEntries.empty() || viewportCurrentWorkspace >= workspaceEntries.size() || !workspaceEntries[viewportCurrentWorkspace]) {
             damage();
             return;
         }
 
-        if (images[viewportCurrentWorkspace]->pWorkspace != window->m_workspace) {
-            const auto WORKSPACE = workspaceImageForWindow(window);
+        if (workspaceEntries[viewportCurrentWorkspace]->pWorkspace != window->m_workspace) {
+            const auto WORKSPACE = workspaceEntryForWindow(window);
             if (!WORKSPACE) {
                 damage();
                 return;
@@ -157,19 +202,8 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
             rebuildGeometryCache();
         }
 
-        if (const auto RESTORED = restoredSelectionWorkspace.lock(); RESTORED && RESTORED == window->m_workspace) {
-            const auto SELECTED = keyboardSelectedWindow.lock();
-            if (SELECTED && SELECTED != window && SELECTED->m_workspace == window->m_workspace) {
-                restoredSelectionWorkspace.reset();
-                damage();
-                return;
-            }
-        }
-
-        restoredSelectionWorkspace.reset();
-
-        if (const auto IMAGE = imageForWindow(window))
-            setKeyboardSelection(IMAGE, true, false);
+        if (const auto ENTRY = windowEntryForWindow(window))
+            setKeyboardSelection(ENTRY, true, false);
 
         queueFocusedWindowCursorSync(window);
 
@@ -180,7 +214,7 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
         if (closing || !pMonitor || !workspace || workspace->m_isSpecialWorkspace || workspace->m_monitor != pMonitor)
             return;
 
-        queueRefreshWorkspaceImages(workspace, false);
+        queueRefreshWorkspaceEntries(workspace, false);
     };
 
     mouseMoveHook = Event::bus()->m_events.input.mouse.move.listen([onCursorMove](Vector2D, Event::SCallbackInfo& info) { onCursorMove(info); });
@@ -188,8 +222,11 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
     mouseAxisHook = Event::bus()->m_events.input.mouse.axis.listen([onMouseAxis](IPointer::SAxisEvent e, Event::SCallbackInfo& info) { onMouseAxis(e, info); });
 
     mouseButtonHook = Event::bus()->m_events.input.mouse.button.listen([onCursorButton](IPointer::SButtonEvent e, Event::SCallbackInfo& info) { onCursorButton(e, info); });
-    touchDownHook   = Event::bus()->m_events.input.touch.down.listen([this](ITouch::SDownEvent, Event::SCallbackInfo& info) {
+    touchDownHook   = Event::bus()->m_events.input.touch.down.listen([this](ITouch::SDownEvent e, Event::SCallbackInfo& info) {
         if (closing)
+            return;
+
+        if (pMonitor && pointerOverBlockingLayerSurface(e.pos * pMonitor->m_size))
             return;
 
         info.cancelled = true;
@@ -206,11 +243,11 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
 
     Cursor::overrideController->setOverride("left_ptr", Cursor::CURSOR_OVERRIDE_SPECIAL_ACTION);
 
-    redrawAll();
+    rebuildAllWorkspaceEntries();
 
     size_t activeIdx = 0;
-    for (size_t i = 0; i < images.size(); ++i) {
-        if (images[i]->pWorkspace && images[i]->pWorkspace == startedOn) {
+    for (size_t i = 0; i < workspaceEntries.size(); ++i) {
+        if (workspaceEntries[i]->pWorkspace && workspaceEntries[i]->pWorkspace == startedOn) {
             activeIdx = i;
             break;
         }
@@ -226,7 +263,6 @@ void CScrollOverview::close(bool switchToSelection) {
 
     cancelPointerInteraction(false);
     pendingAnchorWorkspace.reset();
-    restoredSelectionWorkspace.reset();
     clearFocusedWindowCursorSync();
     releaseKeyboardTakeoverMouse(false);
     viewOffset->setCallbackOnEnd(nullptr);
@@ -243,13 +279,11 @@ void CScrollOverview::close(bool switchToSelection) {
     const auto TARGET_WORKSPACE = switchToSelection ? (closeOnWindow && closeOnWindow->m_workspace ? closeOnWindow->m_workspace : closeOnWorkspace.lock()) :
                                                       (FOCUSED_WINDOW && FOCUSED_WINDOW->m_workspace ? FOCUSED_WINDOW->m_workspace : pMonitor->m_activeWorkspace);
     const bool TARGET_IS_ACTIVE = (!TARGET_WINDOW || TARGET_WINDOW == FOCUSED_WINDOW) && TARGET_WORKSPACE == pMonitor->m_activeWorkspace;
+    const auto FINAL_WORKSPACE  = TARGET_WORKSPACE ? TARGET_WORKSPACE : pMonitor->m_activeWorkspace;
 
     if (switchToSelection && !TARGET_IS_ACTIVE) {
-        if (TARGET_WORKSPACE && TARGET_WORKSPACE != pMonitor->m_activeWorkspace) {
-            g_pDesktopAnimationManager->startAnimation(pMonitor->m_activeWorkspace, CDesktopAnimationManager::ANIMATION_TYPE_OUT, true, true);
-            g_pDesktopAnimationManager->startAnimation(TARGET_WORKSPACE, CDesktopAnimationManager::ANIMATION_TYPE_IN, false, true);
-            pMonitor->changeWorkspace(TARGET_WORKSPACE, true, true, true);
-        }
+        if (TARGET_WORKSPACE && TARGET_WORKSPACE != pMonitor->m_activeWorkspace)
+            activateWorkspace(TARGET_WORKSPACE, false);
 
         if (TARGET_WINDOW)
             Desktop::focusState()->fullWindowFocus(TARGET_WINDOW, Desktop::FOCUS_REASON_KEYBIND);
@@ -257,12 +291,13 @@ void CScrollOverview::close(bool switchToSelection) {
 
     if (TARGET_WINDOW)
         keyboardSelectedWindow = TARGET_WINDOW;
+    if (FINAL_WORKSPACE)
+        reanchorViewportToWorkspace(FINAL_WORKSPACE, true);
 
     rebuildGeometryCache();
 
-    const auto FINAL_WORKSPACE = TARGET_WORKSPACE ? TARGET_WORKSPACE : pMonitor->m_activeWorkspace;
-    if (const auto WORKSPACE_IMAGE = imageForWorkspace(FINAL_WORKSPACE))
-        setHorizontalPanForWorkspace(WORKSPACE_IMAGE, 0.0, true);
+    if (const auto WORKSPACE_ENTRY = workspaceEntryForWorkspace(FINAL_WORKSPACE))
+        setHorizontalPanForWorkspace(WORKSPACE_ENTRY, 0.0, true);
 
     *viewOffset = Vector2D{};
 
@@ -272,18 +307,15 @@ void CScrollOverview::close(bool switchToSelection) {
 }
 
 void CScrollOverview::onPreRender() {
-    if (!closing) {
-        damageDirty = false;
-        if (redrawDirtyWindowImages())
-            damage();
-    }
+    if (pMonitor)
+        pMonitor->m_solitaryClient.reset();
 
     if (!closing && cursorSyncUntilMs != 0 && inputState.mode == ePointerMode::IDLE) {
         const auto NOW = Time::millis(Time::steadyNow());
         if (NOW <= cursorSyncUntilMs) {
             const auto WINDOW = queuedCursorWindow.lock();
 
-            if (centerCursorOnWindowImage(WINDOW))
+            if (centerCursorOnWindowEntry(WINDOW))
                 g_pCompositor->scheduleFrameForMonitor(pMonitor.lock());
         } else
             clearFocusedWindowCursorSync();
@@ -306,14 +338,14 @@ void CScrollOverview::onWorkspaceChange() {
     if (!pMonitor || closing)
         return;
 
-    queueRefreshWorkspaceImages(pMonitor->m_activeWorkspace, false);
+    queueRefreshWorkspaceEntries(pMonitor->m_activeWorkspace, false);
 }
 
 void CScrollOverview::render() {
     if (!closing && inputState.mode == ePointerMode::IDLE)
         highlightHoverDebug(false);
 
-    g_pHyprRenderer->m_renderPass.add(makeUnique<COverviewPassElement>());
+    renderOverviewLive(Time::steadyNow());
 }
 
 void CScrollOverview::setClosing(bool closing_) {

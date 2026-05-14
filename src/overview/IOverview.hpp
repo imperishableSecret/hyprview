@@ -2,8 +2,11 @@
 
 #include <hyprland/src/desktop/DesktopTypes.hpp>
 #include <hyprland/src/helpers/memory/Memory.hpp>
+#include <hyprland/src/helpers/time/Time.hpp>
 #include <hyprutils/math/Region.hpp>
 #include <hyprutils/math/Vector2D.hpp>
+
+class CWLSurfaceResource;
 
 class IOverview {
   public:
@@ -15,6 +18,18 @@ class IOverview {
     virtual void onDamageReported() = 0;
     virtual void onDamageReported(const Hyprutils::Math::CRegion& damage) {
         onDamageReported();
+    }
+    virtual bool shouldHandleSurfaceDamage(SP<CWLSurfaceResource> surface) {
+        return true;
+    }
+    virtual bool shouldAllowSurfaceFrame(SP<CWLSurfaceResource> surface, const Time::steady_tp& now) {
+        return true;
+    }
+    virtual bool shouldAllowRealtimePreviewSchedule() {
+        return true;
+    }
+    virtual bool shouldSuppressRenderDamage() const {
+        return false;
     }
     virtual void      onPreRender() = 0;
 
