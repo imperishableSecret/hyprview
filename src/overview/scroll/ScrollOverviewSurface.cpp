@@ -23,6 +23,7 @@
 #undef private
 
 static constexpr std::chrono::milliseconds OVERVIEW_WINDOW_FRAME_INTERVAL = std::chrono::milliseconds(33);
+static constexpr size_t                    SURFACE_POLICY_CACHE_LIMIT     = 512;
 
 static bool                                windowHasOverviewAnimation(PHLWINDOW window) {
     if (!window)
@@ -42,7 +43,12 @@ static bool layerHasOverviewAnimation(PHLLS layer) {
     return layer->m_realPosition->isBeingAnimated() || layer->m_realSize->isBeingAnimated() || layer->m_alpha->isBeingAnimated();
 }
 
-CScrollOverview::SOverviewSurfaceOwner CScrollOverview::overviewSurfaceOwner(SP<CWLSurfaceResource> surface) const {
+void CScrollOverview::resetSurfacePolicyCache() const {
+    surfaceOwnerCache.clear();
+    surfaceFrameCallbackCache.clear();
+}
+
+CScrollOverview::SOverviewSurfaceOwner CScrollOverview::uncachedOverviewSurfaceOwner(SP<CWLSurfaceResource> surface) const {
     if (!surface)
         return {};
 
@@ -77,6 +83,42 @@ CScrollOverview::SOverviewSurfaceOwner CScrollOverview::overviewSurfaceOwner(SP<
     return {};
 }
 
+CScrollOverview::SOverviewSurfaceOwner CScrollOverview::overviewSurfaceOwner(SP<CWLSurfaceResource> surface) const {
+    if (!surface)
+        return {};
+
+    const auto KEY = surface.get();
+    if (const auto IT = surfaceOwnerCache.find(KEY); IT != surfaceOwnerCache.end()) {
+        const auto& ENTRY = IT->second;
+        switch (ENTRY.type) {
+            case eOverviewSurfaceOwner::WINDOW:
+            case eOverviewSurfaceOwner::WINDOW_POPUP: {
+                const auto WINDOW = ENTRY.window.lock();
+                if (WINDOW)
+                    return {.type = ENTRY.type, .window = WINDOW, .monitor = WINDOW->m_monitor.lock()};
+                break;
+            }
+            case eOverviewSurfaceOwner::LAYER:
+            case eOverviewSurfaceOwner::LAYER_POPUP: {
+                const auto LAYER = ENTRY.layer.lock();
+                if (LAYER)
+                    return {.type = ENTRY.type, .layer = LAYER, .monitor = LAYER->m_monitor.lock()};
+                break;
+            }
+            case eOverviewSurfaceOwner::UNKNOWN: return {};
+        }
+
+        surfaceOwnerCache.erase(IT);
+    }
+
+    if (surfaceOwnerCache.size() > SURFACE_POLICY_CACHE_LIMIT)
+        surfaceOwnerCache.clear();
+
+    const auto OWNER = uncachedOverviewSurfaceOwner(surface);
+    surfaceOwnerCache.emplace(KEY, SOverviewSurfaceOwnerCacheEntry{.type = OWNER.type, .window = OWNER.window, .layer = OWNER.layer});
+    return OWNER;
+}
+
 bool CScrollOverview::surfaceOwnerBelongsToOverviewMonitor(const SOverviewSurfaceOwner& owner, PHLMONITOR monitor) const {
     if (!monitor || owner.type == eOverviewSurfaceOwner::UNKNOWN)
         return false;
@@ -107,12 +149,16 @@ bool CScrollOverview::overviewWindowVisible(PHLWINDOW window) const {
     if (!ENTRY || ENTRY->overviewBox.empty())
         return false;
 
-    return overviewBoxIntersectsMonitor(ENTRY->overviewBox) && !overviewWindowOccludedByFullscreen(window);
+    return windowEntryIntersectsWorkspaceViewport(ENTRY, workspaceEntryForWindowEntry(ENTRY)) && !overviewWindowOccludedByFullscreen(window);
 }
 
 bool CScrollOverview::surfaceTreeHasFrameCallbacks(SP<CWLSurfaceResource> surface) const {
     if (!surface)
         return false;
+
+    const auto KEY = surface.get();
+    if (const auto IT = surfaceFrameCallbackCache.find(KEY); IT != surfaceFrameCallbackCache.end())
+        return IT->second;
 
     bool hasCallbacks = false;
     surface->breadthfirst(
@@ -122,6 +168,10 @@ bool CScrollOverview::surfaceTreeHasFrameCallbacks(SP<CWLSurfaceResource> surfac
         },
         nullptr);
 
+    if (surfaceFrameCallbackCache.size() > SURFACE_POLICY_CACHE_LIMIT)
+        surfaceFrameCallbackCache.clear();
+
+    surfaceFrameCallbackCache.emplace(KEY, hasCallbacks);
     return hasCallbacks;
 }
 
@@ -139,7 +189,7 @@ bool CScrollOverview::hasVisibleRealtimePreviewCallbacks() const {
     };
 
     for (const auto& workspaceEntry : workspaceEntries) {
-        if (!workspaceEntry || workspaceEntry->overviewBox.empty() || !workspaceEntry->overviewBox.overlaps(CBox{{}, MONITOR->m_size}))
+        if (!workspaceIntersectsViewport(workspaceEntry))
             continue;
 
         for (const auto& entry : workspaceEntry->windowEntries) {
@@ -148,7 +198,7 @@ bool CScrollOverview::hasVisibleRealtimePreviewCallbacks() const {
         }
     }
 
-    for (const auto& window : g_pCompositor->m_windows) {
+    for (const auto& window : pinnedFloatingOverviewWindows()) {
         const auto WINDOW = overviewWindowToRender(window);
         if (!WINDOW || !WINDOW->m_pinned || !WINDOW->m_isFloating)
             continue;
@@ -158,6 +208,10 @@ bool CScrollOverview::hasVisibleRealtimePreviewCallbacks() const {
     }
 
     return false;
+}
+
+PHLWINDOW CScrollOverview::closeTargetWindow() const {
+    return overviewWindowToRender(closeFrameWindow.lock());
 }
 
 void CScrollOverview::surfaceTreePresent(SP<CWLSurfaceResource> surface, PHLMONITOR monitor, const Time::steady_tp& now) {
@@ -176,14 +230,43 @@ void CScrollOverview::surfaceTreePresent(SP<CWLSurfaceResource> surface, PHLMONI
         &data);
 }
 
+bool CScrollOverview::sendCloseTargetFrameCallback(const Time::steady_tp& now) {
+    const auto MONITOR = pMonitor.lock();
+    const auto WINDOW  = closeTargetWindow();
+    if (!MONITOR || !windowLiveRenderable(WINDOW) || WINDOW->m_monitor != MONITOR)
+        return false;
+
+    const auto SURFACE = WINDOW->wlSurface() ? WINDOW->wlSurface()->resource() : nullptr;
+    if (!surfaceTreeHasFrameCallbacks(SURFACE))
+        return false;
+
+    const bool PREVIOUS_SENDING   = sendingOverviewFrameCallbacks;
+    sendingOverviewFrameCallbacks = true;
+
+    surfaceTreePresent(SURFACE, MONITOR, now);
+
+    sendingOverviewFrameCallbacks = PREVIOUS_SENDING;
+    lastRealtimePreviewFrame      = now;
+    realtimePreviewFrameQueued    = false;
+    return true;
+}
+
 bool CScrollOverview::shouldHandleSurfaceDamage(SP<CWLSurfaceResource> surface) {
     const auto MONITOR = pMonitor.lock();
     if (!MONITOR || closing || !surface)
         return true;
 
+    ensureGeometryCache();
+
     const auto OWNER = overviewSurfaceOwner(surface);
-    if (OWNER.type == eOverviewSurfaceOwner::UNKNOWN)
+    if (OWNER.type == eOverviewSurfaceOwner::UNKNOWN) {
+        const auto COUNT = ++unknownSurfaceDamageDecisions;
+        Hyprview::telemetryLogLazy([&] {
+            return std::format("event=surface-owner-unknown policy=damage count={} surface={:x} overviewMonitor={} ownerCache={} callbackCache={}", COUNT,
+                               reinterpret_cast<uintptr_t>(surface.get()), MONITOR ? MONITOR->m_name : "<none>", surfaceOwnerCache.size(), surfaceFrameCallbackCache.size());
+        });
         return true;
+    }
 
     auto ownerName = [](eOverviewSurfaceOwner type) -> std::string_view {
         switch (type) {
@@ -205,12 +288,12 @@ bool CScrollOverview::shouldHandleSurfaceDamage(SP<CWLSurfaceResource> surface) 
         const auto ENTRY         = renderedWindowEntryForWindow(WINDOW);
         const auto LAYER_MONITOR = OWNER.layer ? OWNER.layer->m_monitor.lock() : PHLMONITOR{};
         Hyprview::telemetryLog(std::format(
-            "event=surface-damage-decision allow={} reason={} owner={} surface={:x} overviewMonitor={} ownerMonitor={} window={:x} windowWorkspace={} image={} imageBox={} "
-            "imageIntersects={} occluded={} layer={:x} layerNs={} layerLevel={} layerMapped={} layerValidMapped={}",
+            "event=surface-damage-decision allow={} reason={} owner={} surface={:x} overviewMonitor={} ownerMonitor={} window={:x} windowWorkspace={} entry={} entryBox={} "
+            "entryIntersects={} occluded={} layer={:x} layerNs={} layerLevel={} layerMapped={} layerValidMapped={}",
             allow ? 1 : 0, reason, ownerName(OWNER.type), reinterpret_cast<uintptr_t>(surface.get()), MONITOR ? MONITOR->m_name : "<none>",
             OWNER.monitor ? OWNER.monitor->m_name : "<none>", WINDOW ? reinterpret_cast<uintptr_t>(WINDOW.get()) : 0,
             WINDOW && WINDOW->m_workspace ? std::to_string(WINDOW->m_workspace->m_id) : "<none>", ENTRY ? 1 : 0, ENTRY ? Hyprview::formatBox(ENTRY->overviewBox) : "<none>",
-            ENTRY ? overviewBoxIntersectsMonitor(ENTRY->overviewBox) : false, WINDOW ? overviewWindowOccludedByFullscreen(WINDOW) : false,
+            ENTRY ? windowEntryIntersectsWorkspaceViewport(ENTRY, workspaceEntryForWindowEntry(ENTRY)) : false, WINDOW ? overviewWindowOccludedByFullscreen(WINDOW) : false,
             OWNER.layer ? reinterpret_cast<uintptr_t>(OWNER.layer.get()) : 0, OWNER.layer ? OWNER.layer->m_namespace : "<none>", OWNER.layer ? sc<int>(OWNER.layer->m_layer) : -1,
             OWNER.layer ? OWNER.layer->m_mapped : false, OWNER.layer ? Desktop::View::validMapped(OWNER.layer) : false));
     };
@@ -251,7 +334,7 @@ bool CScrollOverview::shouldHandleSurfaceDamage(SP<CWLSurfaceResource> surface) 
     }
 
     const auto ENTRY = renderedWindowEntryForWindow(WINDOW);
-    if (!ENTRY || overviewWindowOccludedByFullscreen(WINDOW) || !overviewBoxIntersectsMonitor(ENTRY->overviewBox)) {
+    if (!ENTRY || overviewWindowOccludedByFullscreen(WINDOW) || !windowEntryIntersectsWorkspaceViewport(ENTRY, workspaceEntryForWindowEntry(ENTRY))) {
         logDecision(false, "window-not-visible-in-overview");
         return false;
     }
@@ -267,9 +350,17 @@ bool CScrollOverview::shouldAllowSurfaceFrame(SP<CWLSurfaceResource> surface, co
     if (!MONITOR || closing || !surface)
         return true;
 
+    ensureGeometryCache();
+
     const auto OWNER = overviewSurfaceOwner(surface);
-    if (OWNER.type == eOverviewSurfaceOwner::UNKNOWN)
+    if (OWNER.type == eOverviewSurfaceOwner::UNKNOWN) {
+        const auto COUNT = ++unknownSurfaceFrameDecisions;
+        Hyprview::telemetryLogLazy([&] {
+            return std::format("event=surface-owner-unknown policy=frame count={} surface={:x} overviewMonitor={} ownerCache={} callbackCache={}", COUNT,
+                               reinterpret_cast<uintptr_t>(surface.get()), MONITOR ? MONITOR->m_name : "<none>", surfaceOwnerCache.size(), surfaceFrameCallbackCache.size());
+        });
         return true;
+    }
 
     auto ownerName = [](eOverviewSurfaceOwner type) -> std::string_view {
         switch (type) {
@@ -290,14 +381,14 @@ bool CScrollOverview::shouldAllowSurfaceFrame(SP<CWLSurfaceResource> surface, co
         const auto WINDOW = overviewWindowToRender(OWNER.window);
         const auto ENTRY  = renderedWindowEntryForWindow(WINDOW);
         Hyprview::telemetryLog(std::format(
-            "event=surface-frame-decision allow={} reason={} owner={} surface={:x} overviewMonitor={} ownerMonitor={} window={:x} windowWorkspace={} image={} imageBox={} "
-            "imageIntersects={} overviewWindowVisible={} sendingOverviewFrameCallbacks={} layer={:x} layerNs={} layerLevel={} layerMapped={} layerValidMapped={}",
+            "event=surface-frame-decision allow={} reason={} owner={} surface={:x} overviewMonitor={} ownerMonitor={} window={:x} windowWorkspace={} entry={} entryBox={} "
+            "entryIntersects={} overviewWindowVisible={} sendingOverviewFrameCallbacks={} layer={:x} layerNs={} layerLevel={} layerMapped={} layerValidMapped={}",
             allow ? 1 : 0, reason, ownerName(OWNER.type), reinterpret_cast<uintptr_t>(surface.get()), MONITOR ? MONITOR->m_name : "<none>",
             OWNER.monitor ? OWNER.monitor->m_name : "<none>", WINDOW ? reinterpret_cast<uintptr_t>(WINDOW.get()) : 0,
             WINDOW && WINDOW->m_workspace ? std::to_string(WINDOW->m_workspace->m_id) : "<none>", ENTRY ? 1 : 0, ENTRY ? Hyprview::formatBox(ENTRY->overviewBox) : "<none>",
-            ENTRY ? overviewBoxIntersectsMonitor(ENTRY->overviewBox) : false, WINDOW ? overviewWindowVisible(WINDOW) : false, sendingOverviewFrameCallbacks ? 1 : 0,
-            OWNER.layer ? reinterpret_cast<uintptr_t>(OWNER.layer.get()) : 0, OWNER.layer ? OWNER.layer->m_namespace : "<none>", OWNER.layer ? sc<int>(OWNER.layer->m_layer) : -1,
-            OWNER.layer ? OWNER.layer->m_mapped : false, OWNER.layer ? Desktop::View::validMapped(OWNER.layer) : false));
+            ENTRY ? windowEntryIntersectsWorkspaceViewport(ENTRY, workspaceEntryForWindowEntry(ENTRY)) : false, WINDOW ? overviewWindowVisible(WINDOW) : false,
+            sendingOverviewFrameCallbacks ? 1 : 0, OWNER.layer ? reinterpret_cast<uintptr_t>(OWNER.layer.get()) : 0, OWNER.layer ? OWNER.layer->m_namespace : "<none>",
+            OWNER.layer ? sc<int>(OWNER.layer->m_layer) : -1, OWNER.layer ? OWNER.layer->m_mapped : false, OWNER.layer ? Desktop::View::validMapped(OWNER.layer) : false));
     };
 
     if (!surfaceOwnerBelongsToOverviewMonitor(OWNER, MONITOR)) {
@@ -350,6 +441,8 @@ bool CScrollOverview::shouldAllowRealtimePreviewSchedule() {
     if (scale->isBeingAnimated() || viewOffset->isBeingAnimated())
         return true;
 
+    ensureGeometryCache();
+
     if (!hasVisibleRealtimePreviewCallbacks()) {
         realtimePreviewFrameQueued = false;
         return false;
@@ -377,7 +470,10 @@ bool CScrollOverview::shouldSuppressRenderDamage() const {
     if (scale->isBeingAnimated() || viewOffset->isBeingAnimated())
         return false;
 
-    for (const auto& window : g_pCompositor->m_windows) {
+    if (geometryCacheNeedsRebuild())
+        return false;
+
+    for (const auto& window : overviewWindows()) {
         const auto WINDOW = overviewWindowToRender(window);
         if (!windowLiveRenderable(WINDOW) || WINDOW->m_monitor != MONITOR || !overviewWindowVisible(WINDOW))
             continue;
@@ -386,9 +482,9 @@ bool CScrollOverview::shouldSuppressRenderDamage() const {
             return false;
     }
 
-    for (const auto LAYER : {ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND, ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM, ZWLR_LAYER_SHELL_V1_LAYER_TOP, ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY}) {
-        for (const auto& layerRef : MONITOR->m_layerSurfaceLayers[LAYER]) {
-            if (layerHasOverviewAnimation(layerRef.lock()))
+    for (uint32_t layer = 0; layer < LAYER_LEVEL_COUNT; ++layer) {
+        for (const auto& LAYER : visibleLayersForLevel(layer)) {
+            if (layerHasOverviewAnimation(LAYER))
                 return false;
         }
     }
@@ -427,6 +523,7 @@ int CScrollOverview::realtimePreviewTimerCallback(void* data) {
     OVERVIEW->realtimePreviewTimerArmed  = false;
     OVERVIEW->realtimePreviewTimerDue    = {};
     OVERVIEW->realtimePreviewFrameQueued = false;
+    OVERVIEW->resetSurfacePolicyCache();
 
     if (OVERVIEW->closing || !OVERVIEW->pMonitor)
         return 0;
@@ -441,11 +538,14 @@ int CScrollOverview::realtimePreviewTimerCallback(void* data) {
 
 void CScrollOverview::sendOverviewFrameCallbacks(const Time::steady_tp& now) {
     const auto MONITOR = pMonitor.lock();
-    if (!MONITOR || closing)
+    if (!MONITOR)
         return;
 
+    if (closing)
+        sendCloseTargetFrameCallback(now);
+
     bool       sentWindowFrame    = false;
-    const bool CAN_FRAME_WINDOW   = shouldAllowRealtimePreviewFrame();
+    const bool CAN_FRAME_WINDOW   = closing || shouldAllowRealtimePreviewFrame();
     const bool PREVIOUS_SENDING   = sendingOverviewFrameCallbacks;
     sendingOverviewFrameCallbacks = CAN_FRAME_WINDOW;
     std::vector<PHLWINDOW> framedWindows;
@@ -474,7 +574,7 @@ void CScrollOverview::sendOverviewFrameCallbacks(const Time::steady_tp& now) {
     };
 
     for (const auto& workspaceEntry : workspaceEntries) {
-        if (!workspaceEntry || workspaceEntry->overviewBox.empty() || !workspaceEntry->overviewBox.overlaps(CBox{{}, MONITOR->m_size}))
+        if (!workspaceIntersectsViewport(workspaceEntry))
             continue;
 
         for (const auto& entry : workspaceEntry->windowEntries) {
@@ -485,7 +585,7 @@ void CScrollOverview::sendOverviewFrameCallbacks(const Time::steady_tp& now) {
         }
     }
 
-    for (const auto& window : g_pCompositor->m_windows) {
+    for (const auto& window : pinnedFloatingOverviewWindows()) {
         const auto WINDOW = overviewWindowToRender(window);
         if (!WINDOW || !WINDOW->m_pinned || !WINDOW->m_isFloating || WINDOW->m_monitor != MONITOR)
             continue;
@@ -499,4 +599,5 @@ void CScrollOverview::sendOverviewFrameCallbacks(const Time::steady_tp& now) {
         lastRealtimePreviewFrame = now;
 
     realtimePreviewFrameQueued = false;
+    resetSurfacePolicyCache();
 }

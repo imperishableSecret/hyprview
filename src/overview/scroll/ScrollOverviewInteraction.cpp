@@ -199,7 +199,7 @@ bool CScrollOverview::pointerOverBlockingLayerSurface(const Vector2D& local) con
 }
 
 void CScrollOverview::selectHoveredWorkspace() {
-    rebuildGeometryCache();
+    ensureGeometryCache();
 
     closeOnWindow.reset();
     closeOnWorkspace.reset();
@@ -268,7 +268,7 @@ void CScrollOverview::handlePointerPress(uint32_t button) {
     if (inputState.mode != ePointerMode::IDLE)
         return;
 
-    rebuildGeometryCache();
+    ensureGeometryCache();
 
     inputState               = {};
     inputState.pressPosLocal = lastMousePosLocal;
@@ -331,6 +331,7 @@ void CScrollOverview::handlePointerAxis(IPointer::SAxisEvent event) {
         const auto VAL            = std::clamp(sc<float>(scale->value() + event.delta / -500.F), 0.05F, 0.95F);
         *scale                    = VAL;
         wheelWorkspaceScrollAccum = 0.0;
+        markGeometryCacheDirty(GEOMETRY_DIRTY_VIEWPORT | GEOMETRY_DIRTY_INSERTION_MARKERS);
     } else if (event.source == WL_POINTER_AXIS_SOURCE_WHEEL || event.mouse || event.deltaDiscrete != 0) {
         wheelWorkspaceScrollAccum = 0.0;
         moveViewportWorkspace(event.delta > 0);
@@ -360,7 +361,7 @@ void CScrollOverview::beginWindowDrag() {
         return;
     }
 
-    rebuildGeometryCache();
+    ensureGeometryCache();
     if (const auto ENTRY = renderedWindowEntryForWindow(DRAG_WINDOW); ENTRY && !ENTRY->overviewBox.empty()) {
         inputState.windowDrag->sourceBox       = ENTRY->overviewBox;
         inputState.windowDrag->grabOffsetLocal = inputState.lastPosLocal - ENTRY->overviewBox.pos();
@@ -391,7 +392,7 @@ void CScrollOverview::beginWindowDrag() {
 
 void CScrollOverview::updateWindowDrag(const Vector2D& local) {
     inputState.lastPosLocal = local;
-    rebuildGeometryCache();
+    ensureGeometryCache();
 
     if (inputState.windowDrag) {
         if (const auto ENTRY = renderedWindowEntryForWindow(inputState.windowDrag->window.lock()); ENTRY && !ENTRY->overviewBox.empty())
@@ -442,15 +443,15 @@ bool CScrollOverview::snapMousePanForWorkspace(const SP<SWorkspaceEntry>& worksp
     SP<SWindowEntry> target;
     double           bestScore = std::numeric_limits<double>::max();
 
-    for (const auto& image : workspace->windowEntries) {
-        if (!image || !image->pWindow || image->overviewBox.empty())
+    for (const auto& entry : workspace->windowEntries) {
+        if (!entry || !entry->pWindow || entry->overviewBox.empty())
             continue;
 
-        const auto WINDOW = image->pWindow.lock();
+        const auto WINDOW = entry->pWindow.lock();
         if (!WINDOW || WINDOW->m_isFloating)
             continue;
 
-        const double CENTER = image->overviewBox.middle().x;
+        const double CENTER = entry->overviewBox.middle().x;
         if (direction > 0 && CENTER <= TARGET_X + CENTER_GRACE)
             continue;
         if (direction < 0 && CENTER >= TARGET_X - CENTER_GRACE)
@@ -459,7 +460,7 @@ bool CScrollOverview::snapMousePanForWorkspace(const SP<SWorkspaceEntry>& worksp
         const double score = std::abs(CENTER - TARGET_X);
 
         if (score < bestScore) {
-            target    = image;
+            target    = entry;
             bestScore = score;
         }
     }
@@ -558,12 +559,12 @@ void CScrollOverview::updateMouseSnapPanNavigation(const Vector2D& local) {
 
     SP<SWorkspaceEntry> WORKSPACE;
     for (auto it = workspaceEntries.rbegin(); it != workspaceEntries.rend(); ++it) {
-        const auto& image = *it;
-        if (!image || !image->pWorkspace)
+        const auto& entry = *it;
+        if (!entry || !entry->pWorkspace)
             continue;
 
-        if (local.y >= image->overviewBox.y && local.y <= image->overviewBox.y + image->overviewBox.h) {
-            WORKSPACE = image;
+        if (local.y >= entry->overviewBox.y && local.y <= entry->overviewBox.y + entry->overviewBox.h) {
+            WORKSPACE = entry;
             break;
         }
     }
@@ -970,7 +971,7 @@ bool CScrollOverview::hasDropTarget() const {
 }
 
 void CScrollOverview::highlightHoverDebug(bool damageOnChange) {
-    rebuildGeometryCache();
+    ensureGeometryCache();
 
     const auto OLD_HOVERED_WINDOW    = hoveredWindow;
     const auto OLD_HOVERED_WORKSPACE = hoveredWorkspace;

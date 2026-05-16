@@ -354,7 +354,7 @@ The live backdrop clears to `backdrop_col`, renders `BACKGROUND` layer-shell sur
 
 When `show_workspace_layers = true`, `BACKGROUND` and `BOTTOM` layer-shell surfaces are also rendered inside each workspace card before window content. `TOP` and `OVERLAY` layers, layer popups, IME popups, and drag icons render above the overview in the native layer phase.
 
-The overview now uses live window and layer rendering. Remaining migration work is cleanup, naming, culling, lifecycle hardening, and performance optimization, not snapshot fallback.
+The overview uses live window and layer rendering. Hyprview does not keep cached window thumbnails or a snapshot fallback path. Closing windows may still draw Hyprland's own close-animation snapshot after their live surfaces are gone.
 
 ## Known quirks
 

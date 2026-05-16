@@ -27,6 +27,45 @@ namespace {
     }
 }
 
+void CScrollOverview::resetLayerRenderCache() const {
+    for (auto& level : visibleLayerLevelCache)
+        level.clear();
+
+    visibleLayerLevelCacheValid.fill(false);
+}
+
+bool CScrollOverview::layerRenderableOnOverviewMonitor(PHLLS layer) const {
+    const auto MONITOR = pMonitor.lock();
+    if (!MONITOR || !layer || !Desktop::View::validMapped(layer))
+        return false;
+
+    const auto LAYER_MONITOR = layer->m_monitor.lock();
+    return !LAYER_MONITOR || LAYER_MONITOR == MONITOR;
+}
+
+const CScrollOverview::SLayerList& CScrollOverview::visibleLayersForLevel(uint32_t layer) const {
+    static const SLayerList EMPTY;
+
+    const auto              MONITOR = pMonitor.lock();
+    if (!MONITOR || layer >= visibleLayerLevelCache.size() || layer >= MONITOR->m_layerSurfaceLayers.size())
+        return EMPTY;
+
+    if (visibleLayerLevelCacheValid[layer])
+        return visibleLayerLevelCache[layer];
+
+    auto& CACHE = visibleLayerLevelCache[layer];
+    CACHE.clear();
+
+    for (const auto& layerRef : MONITOR->m_layerSurfaceLayers[layer]) {
+        const auto LAYER = layerRef.lock();
+        if (layerRenderableOnOverviewMonitor(LAYER))
+            CACHE.emplace_back(LAYER);
+    }
+
+    visibleLayerLevelCacheValid[layer] = true;
+    return CACHE;
+}
+
 void CScrollOverview::forceLayerSurfaceTreeVisibility(PHLLS layer, bool popups) {
     if (!layer)
         return;
@@ -73,54 +112,47 @@ void CScrollOverview::renderLiveBackdrop(const Time::steady_tp& now) {
     g_pHyprOpenGL->renderTextureInternal(BLURRED_TEX, texbox, {.damage = &renderDamage, .a = 1.0});
 }
 
-void CScrollOverview::renderBackdropLayer(PHLLS layer, const Time::steady_tp& now) {
+bool CScrollOverview::renderBackdropLayer(PHLLS layer, const Time::steady_tp& now) {
     const auto MONITOR = pMonitor.lock();
     if (!MONITOR || !layer)
-        return;
+        return false;
 
-    if (!Desktop::View::validMapped(layer))
-        return;
-
-    const auto LAYER_MONITOR = layer->m_monitor.lock();
-    if (LAYER_MONITOR && LAYER_MONITOR != MONITOR)
-        return;
+    if (!layerRenderableOnOverviewMonitor(layer))
+        return false;
 
     forceLayerSurfaceTreeVisibility(layer, false);
     g_pHyprRenderer->renderLayer(layer, MONITOR, now, false);
+    return true;
 }
 
 void CScrollOverview::renderBackdropLayerLevel(uint32_t layer, const Time::steady_tp& now) {
     const auto MONITOR = pMonitor.lock();
-    if (!MONITOR || layer >= MONITOR->m_layerSurfaceLayers.size())
+    if (!MONITOR)
         return;
 
-    for (const auto& layerRef : MONITOR->m_layerSurfaceLayers[layer]) {
-        const auto LAYER = layerRef.lock();
-        renderBackdropLayer(LAYER, now);
-    }
+    bool rendered = false;
+    for (const auto& LAYER : visibleLayersForLevel(layer))
+        rendered = renderBackdropLayer(LAYER, now) || rendered;
 
-    flushCurrentRenderPass(MONITOR);
+    if (rendered)
+        flushCurrentRenderPass(MONITOR);
 }
 
-void CScrollOverview::renderWorkspaceLayer(PHLLS layer, const SP<SWorkspaceEntry>& workspaceEntry, const Time::steady_tp& now) {
+bool CScrollOverview::renderWorkspaceLayer(PHLLS layer, const SP<SWorkspaceEntry>& workspaceEntry, const Time::steady_tp& now) {
     const auto MONITOR = pMonitor.lock();
     if (!MONITOR || !layer || !workspaceEntry || workspaceEntry->overviewBox.empty())
-        return;
+        return false;
 
-    if (!Desktop::View::validMapped(layer))
-        return;
-
-    const auto LAYER_MONITOR = layer->m_monitor.lock();
-    if (LAYER_MONITOR && LAYER_MONITOR != MONITOR)
-        return;
+    if (!layerRenderableOnOverviewMonitor(layer))
+        return false;
 
     const auto OVERVIEW_BOX = workspaceEntry->overviewBox;
-    if (!overviewBoxIntersectsMonitor(OVERVIEW_BOX))
-        return;
+    if (!workspaceIntersectsViewport(workspaceEntry))
+        return false;
 
     const double LAYER_SCALE = std::min(OVERVIEW_BOX.w / std::max(MONITOR->m_size.x, 1.0), OVERVIEW_BOX.h / std::max(MONITOR->m_size.y, 1.0));
     if (LAYER_SCALE <= 0.0)
-        return;
+        return false;
 
     const Vector2D SAVED_POSITION = layer->m_realPosition->value();
     const Vector2D SAVED_SIZE     = layer->m_realSize->value();
@@ -136,19 +168,28 @@ void CScrollOverview::renderWorkspaceLayer(PHLLS layer, const SP<SWorkspaceEntry
 
     forceLayerSurfaceTreeVisibility(layer, false);
     g_pHyprRenderer->renderLayer(layer, MONITOR, now, false);
+    return true;
 }
 
 void CScrollOverview::renderWorkspaceLayerLevel(const SP<SWorkspaceEntry>& workspaceEntry, uint32_t layer, const Time::steady_tp& now) {
     const auto MONITOR = pMonitor.lock();
-    if (!MONITOR || layer >= MONITOR->m_layerSurfaceLayers.size())
+    if (!MONITOR || !g_hyprviewConfig.scrolling.showWorkspaceLayers)
         return;
 
-    for (const auto& layerRef : MONITOR->m_layerSurfaceLayers[layer]) {
-        const auto LAYER = layerRef.lock();
-        renderWorkspaceLayer(LAYER, workspaceEntry, now);
-    }
+    const auto& LAYERS = visibleLayersForLevel(layer);
+    if (LAYERS.empty())
+        return;
 
-    flushCurrentRenderPass(MONITOR);
+    const CBox WORKSPACE_CLIP = workspaceRenderClipBox(workspaceEntry);
+    if (WORKSPACE_CLIP.empty())
+        return;
+
+    bool rendered = false;
+    for (const auto& LAYER : LAYERS)
+        rendered = renderWorkspaceLayer(LAYER, workspaceEntry, now) || rendered;
+
+    if (rendered)
+        flushCurrentRenderPass(MONITOR);
 }
 
 void CScrollOverview::renderHyprlandLayerPhase(const Time::steady_tp& now) {
@@ -161,14 +202,15 @@ void CScrollOverview::renderHyprlandLayerPhase(const Time::steady_tp& now) {
     auto restoreSurfaceFeedback  = Hyprutils::Utils::CScopeGuard([PREVIOUS_BLOCK_SURFACE_FEEDBACK] { g_pHyprRenderer->m_bBlockSurfaceFeedback = PREVIOUS_BLOCK_SURFACE_FEEDBACK; });
     auto restoreForcedVisibility = Hyprutils::Utils::CScopeGuard([this] { restoreForcedSurfaceVisibility(); });
 
-    auto renderLayerLevel = [&](uint32_t layer, bool popups = false) {
-        for (const auto& layerRef : MONITOR->m_layerSurfaceLayers[layer]) {
-            const auto LAYER = layerRef.lock();
-            if (!LAYER)
-                continue;
+    std::vector<PHLLS> renderedPopupLayers;
 
-            if (!Desktop::View::validMapped(LAYER))
-                continue;
+    auto               renderLayerLevel = [&](uint32_t layer, bool popups = false) {
+        for (const auto& LAYER : visibleLayersForLevel(layer)) {
+            if (popups) {
+                if (std::ranges::find(renderedPopupLayers, LAYER) != renderedPopupLayers.end())
+                    continue;
+                renderedPopupLayers.emplace_back(LAYER);
+            }
 
             forceLayerSurfaceTreeVisibility(LAYER, popups);
             g_pHyprRenderer->renderLayer(LAYER, MONITOR, now, popups);

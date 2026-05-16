@@ -76,13 +76,13 @@ SP<CScrollOverview::SWorkspaceEntry> CScrollOverview::workspaceEntryForWindow(PH
     return nullptr;
 }
 
-SP<CScrollOverview::SWorkspaceEntry> CScrollOverview::workspaceEntryForWindowEntry(const SP<SWindowEntry>& image) const {
-    if (!image)
+SP<CScrollOverview::SWorkspaceEntry> CScrollOverview::workspaceEntryForWindowEntry(const SP<SWindowEntry>& entry) const {
+    if (!entry)
         return nullptr;
 
     rebuildWindowEntryLookups();
 
-    const auto IT = windowEntryWorkspaceLookup.find(image.get());
+    const auto IT = windowEntryWorkspaceLookup.find(entry.get());
     return IT == windowEntryWorkspaceLookup.end() ? nullptr : IT->second;
 }
 
@@ -123,13 +123,13 @@ SP<CScrollOverview::SWindowEntry> CScrollOverview::entryForKeyboardSelection() c
     return windowEntryForWindow(WINDOW);
 }
 
-void CScrollOverview::centerWindowEntryInScrollingWorkspace(SP<SWindowEntry> image, bool animate) {
-    if (!pMonitor || !image || !image->pWindow) {
+void CScrollOverview::centerWindowEntryInScrollingWorkspace(SP<SWindowEntry> entry, bool animate) {
+    if (!pMonitor || !entry || !entry->pWindow) {
         Hyprview::telemetryLogLazy([&] { return std::format("event=selection-center-skip reason=invalid-input animate={}", Hyprview::boolToken(animate)); });
         return;
     }
 
-    const auto WINDOW = image->pWindow.lock();
+    const auto WINDOW = entry->pWindow.lock();
     if (!WINDOW || WINDOW->m_isFloating || !WINDOW->m_realPosition || !WINDOW->m_realSize) {
         Hyprview::telemetryLogLazy([&] {
             return std::format("event=selection-center-skip reason=invalid-window window={} floating={} animate={}", windowID(WINDOW),
@@ -138,7 +138,7 @@ void CScrollOverview::centerWindowEntryInScrollingWorkspace(SP<SWindowEntry> ima
         return;
     }
 
-    const auto WORKSPACE = workspaceEntryForWindowEntry(image);
+    const auto WORKSPACE = workspaceEntryForWindowEntry(entry);
     if (!WORKSPACE || !workspaceUsesScrollingLayout(WORKSPACE->pWorkspace)) {
         Hyprview::telemetryLogLazy([&] {
             return std::format("event=selection-center-skip reason=not-scrolling window={} workspace={} animate={}", windowID(WINDOW),
@@ -173,13 +173,13 @@ void CScrollOverview::centerWindowEntryInScrollingWorkspace(SP<SWindowEntry> ima
     setHorizontalPanForWorkspace(WORKSPACE, TARGET_PAN, animate);
 }
 
-void CScrollOverview::ensureSelectionVisible(SP<SWindowEntry> image) {
-    centerWindowEntryInScrollingWorkspace(image, true);
+void CScrollOverview::ensureSelectionVisible(SP<SWindowEntry> entry) {
+    centerWindowEntryInScrollingWorkspace(entry, true);
 }
 
-void CScrollOverview::setKeyboardSelection(SP<SWindowEntry> image, bool lockedToKeyboard, bool damageOnChange) {
+void CScrollOverview::setKeyboardSelection(SP<SWindowEntry> entry, bool lockedToKeyboard, bool damageOnChange) {
     const auto OLD_SELECTION = keyboardSelectedWindow;
-    const auto WINDOW        = image && image->pWindow ? image->pWindow.lock() : PHLWINDOW{};
+    const auto WINDOW        = entry && entry->pWindow ? entry->pWindow.lock() : PHLWINDOW{};
     const auto ACTIVE        = Desktop::focusState()->window();
 
     Hyprview::telemetryLogLazy([&] {
@@ -198,7 +198,7 @@ void CScrollOverview::setKeyboardSelection(SP<SWindowEntry> image, bool lockedTo
             rememberWindowSelection(WINDOW);
             keyboardTakeoverMouse();
 
-            ensureSelectionVisible(image);
+            ensureSelectionVisible(entry);
 
             if (g_hyprviewConfig.keyboard.focusFollowsSelection && Desktop::focusState()->window() != WINDOW)
                 Desktop::focusState()->fullWindowFocus(WINDOW, Desktop::FOCUS_REASON_KEYBIND);
@@ -245,7 +245,7 @@ void CScrollOverview::syncSelectionToViewport(bool damageOnChange) {
 }
 
 bool CScrollOverview::moveHorizontalSelection(bool right) {
-    rebuildGeometryCache();
+    ensureGeometryCache();
     pruneRememberedSelections();
 
     auto CURRENT = entryForKeyboardSelection();
@@ -340,7 +340,7 @@ bool CScrollOverview::activateSelection() {
     if (!g_hyprviewConfig.keyboard.enabled || closing)
         return false;
 
-    rebuildGeometryCache();
+    ensureGeometryCache();
     pruneRememberedSelections();
 
     auto ENTRY = entryForKeyboardSelection();

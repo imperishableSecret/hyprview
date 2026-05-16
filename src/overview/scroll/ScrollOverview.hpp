@@ -4,11 +4,11 @@
 
 #include "../../plugin/HyprviewConfig.hpp"
 #include <hyprland/src/desktop/DesktopTypes.hpp>
-#include <hyprland/src/render/Framebuffer.hpp>
 #include <hyprland/src/render/Texture.hpp>
 #include <hyprland/src/helpers/AnimatedVariable.hpp>
 #include <hyprland/src/event/EventBus.hpp>
 #include <hyprland/src/helpers/signal/Signal.hpp>
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <optional>
@@ -34,6 +34,8 @@ class CScrollOverview : public IOverview {
     virtual bool shouldAllowSurfaceFrame(SP<CWLSurfaceResource> surface, const Time::steady_tp& now);
     virtual bool shouldAllowRealtimePreviewSchedule();
     virtual bool shouldSuppressRenderDamage() const;
+    virtual bool shouldRenderNativeWorkspace() const;
+    virtual void finishNativeWorkspaceHandoff();
     virtual void onPreRender();
 
     virtual void setClosing(bool closing);
@@ -82,11 +84,28 @@ class CScrollOverview : public IOverview {
         LAYER_POPUP,
     };
 
+    static constexpr uint32_t GEOMETRY_DIRTY_NONE              = 0;
+    static constexpr uint32_t GEOMETRY_DIRTY_VIEWPORT          = 1 << 0;
+    static constexpr uint32_t GEOMETRY_DIRTY_WORKSPACE_LIST    = 1 << 1;
+    static constexpr uint32_t GEOMETRY_DIRTY_WINDOW_ENTRIES    = 1 << 2;
+    static constexpr uint32_t GEOMETRY_DIRTY_WINDOW_GEOMETRY   = 1 << 3;
+    static constexpr uint32_t GEOMETRY_DIRTY_WORKSPACE_PAN     = 1 << 4;
+    static constexpr uint32_t GEOMETRY_DIRTY_INSERTION_MARKERS = 1 << 5;
+    static constexpr uint32_t GEOMETRY_DIRTY_ALL = GEOMETRY_DIRTY_VIEWPORT | GEOMETRY_DIRTY_WORKSPACE_LIST | GEOMETRY_DIRTY_WINDOW_ENTRIES | GEOMETRY_DIRTY_WINDOW_GEOMETRY |
+        GEOMETRY_DIRTY_WORKSPACE_PAN | GEOMETRY_DIRTY_INSERTION_MARKERS;
+    static constexpr size_t LAYER_LEVEL_COUNT = 4;
+
     struct SOverviewSurfaceOwner {
         eOverviewSurfaceOwner type = eOverviewSurfaceOwner::UNKNOWN;
         PHLWINDOW             window;
         PHLLS                 layer;
         PHLMONITOR            monitor;
+    };
+
+    struct SOverviewSurfaceOwnerCacheEntry {
+        eOverviewSurfaceOwner type = eOverviewSurfaceOwner::UNKNOWN;
+        PHLWINDOWREF          window;
+        PHLLSREF              layer;
     };
 
     struct SForcedSurfaceVisibility {
@@ -98,6 +117,10 @@ class CScrollOverview : public IOverview {
         PHLWINDOWREF window;
         bool         hidden = false;
     };
+
+    using SLayerList           = std::vector<PHLLS>;
+    using SWindowList          = std::vector<PHLWINDOW>;
+    using SOptionalWorkspaceID = std::optional<WORKSPACEID>;
 
     struct SDropTarget {
         eDropTargetType     type = eDropTargetType::NONE;
@@ -140,13 +163,13 @@ class CScrollOverview : public IOverview {
     void                     keyboardTakeoverMouse();
     void                     releaseKeyboardTakeoverMouse(bool allowHoverSelection);
     void                     syncSelectionToViewport(bool damageOnChange = true);
-    void                     setKeyboardSelection(SP<SWindowEntry> image, bool lockedToKeyboard, bool damageOnChange = true);
+    void                     setKeyboardSelection(SP<SWindowEntry> entry, bool lockedToKeyboard, bool damageOnChange = true);
     SP<SWindowEntry>         entryForKeyboardSelection() const;
     SP<SWindowEntry>         selectableEntryForWorkspace(const SP<SWorkspaceEntry>& workspace) const;
     SP<SWorkspaceEntry>      workspaceEntryForWindow(PHLWINDOW window) const;
-    SP<SWorkspaceEntry>      workspaceEntryForWindowEntry(const SP<SWindowEntry>& image) const;
-    void                     ensureSelectionVisible(SP<SWindowEntry> image);
-    void                     centerWindowEntryInScrollingWorkspace(SP<SWindowEntry> image, bool animate = true);
+    SP<SWorkspaceEntry>      workspaceEntryForWindowEntry(const SP<SWindowEntry>& entry) const;
+    void                     ensureSelectionVisible(SP<SWindowEntry> entry);
+    void                     centerWindowEntryInScrollingWorkspace(SP<SWindowEntry> entry, bool animate = true);
     bool                     moveHorizontalSelection(bool right);
     bool                     moveViewportWorkspace(bool up);
     bool                     setViewportWorkspace(size_t index, bool warp = false, bool activate = false);
@@ -161,6 +184,9 @@ class CScrollOverview : public IOverview {
     double                   viewOffsetForWorkspaceIndex(size_t index) const;
     Vector2D                 clampedViewOffset(Vector2D offset) const;
     void                     rebuildGeometryCache();
+    void                     ensureGeometryCache();
+    void                     markGeometryCacheDirty(uint32_t flags = GEOMETRY_DIRTY_ALL);
+    bool                     geometryCacheNeedsRebuild() const;
     bool                     workspaceUsesScrollingLayout(PHLWORKSPACE workspace) const;
     SWorkspacePanRange       horizontalPanRangeForWorkspace(const SP<SWorkspaceEntry>& workspace) const;
     double                   horizontalPanForWorkspace(const SP<SWorkspaceEntry>& workspace) const;
@@ -207,21 +233,40 @@ class CScrollOverview : public IOverview {
     void                     renderWorkspaceAnnotations();
     void                     renderWorkspaceShadows();
     void                     renderInsertionMarkers();
+    void                     resetSurfacePolicyCache() const;
+    SOverviewSurfaceOwner    uncachedOverviewSurfaceOwner(SP<CWLSurfaceResource> surface) const;
     SOverviewSurfaceOwner    overviewSurfaceOwner(SP<CWLSurfaceResource> surface) const;
     bool                     surfaceOwnerBelongsToOverviewMonitor(const SOverviewSurfaceOwner& owner, PHLMONITOR monitor) const;
     bool                     overviewWindowVisible(PHLWINDOW window) const;
+    CBox                     overviewViewportBox() const;
+    CBox                     expandedOverviewViewportBox(double margin = 0.0) const;
+    CBox                     workspaceRenderClipBox(const SP<SWorkspaceEntry>& workspace) const;
+    double                   overviewCullMargin() const;
     bool                     overviewBoxIntersectsMonitor(const CBox& box) const;
+    bool                     overviewBoxIntersectsViewport(const CBox& box, double margin = 0.0) const;
+    bool                     workspaceIntersectsViewport(const SP<SWorkspaceEntry>& workspace, double margin = 0.0) const;
+    bool                     windowEntryIntersectsWorkspaceViewport(const SP<SWindowEntry>& entry, const SP<SWorkspaceEntry>& workspace, double margin = 0.0) const;
     bool                     overviewWindowOccludedByFullscreen(PHLWINDOW window) const;
     PHLWINDOW                overviewWindowToRender(PHLWINDOW window) const;
-    PHLWINDOW                windowForEntry(const SP<SWindowEntry>& image) const;
+    PHLWINDOW                windowForEntry(const SP<SWindowEntry>& entry) const;
     void                     rebuildWindowEntryLookups() const;
     void                     invalidateWindowEntryLookups() const;
     SP<SWindowEntry>         renderedWindowEntryForWindow(PHLWINDOW window) const;
-    bool                     windowEntryRenderable(const SP<SWindowEntry>& image) const;
-    bool                     windowEntryVisible(const SP<SWindowEntry>& image) const;
+    bool                     windowEntryRenderable(const SP<SWindowEntry>& entry) const;
+    bool                     windowEntryVisible(const SP<SWindowEntry>& entry, const SP<SWorkspaceEntry>& workspace = nullptr) const;
+
+    void                     invalidateOverviewWindowIndex() const;
+    SOptionalWorkspaceID     overviewWorkspaceIDForWindow(PHLWINDOW window) const;
+    void                     rebuildOverviewWindowIndex() const;
+    const SWindowList&       overviewWindows() const;
+    const SWindowList&       pinnedFloatingOverviewWindows() const;
+    const SWindowList&       overviewWindowsForWorkspace(PHLWORKSPACE workspace, bool floating) const;
+
     double                   overviewStyleProgress() const;
     bool                     surfaceTreeHasFrameCallbacks(SP<CWLSurfaceResource> surface) const;
     bool                     hasVisibleRealtimePreviewCallbacks() const;
+    PHLWINDOW                closeTargetWindow() const;
+    bool                     sendCloseTargetFrameCallback(const Time::steady_tp& now);
     void                     surfaceTreePresent(SP<CWLSurfaceResource> surface, PHLMONITOR monitor, const Time::steady_tp& now);
     void                     sendOverviewFrameCallbacks(const Time::steady_tp& now);
     bool                     shouldAllowRealtimePreviewFrame() const;
@@ -235,14 +280,17 @@ class CScrollOverview : public IOverview {
     void                     restoreForcedWindowVisibility();
     void                     renderOverviewLive(const Time::steady_tp& now);
     void                     renderWorkspaceLive(const SP<SWorkspaceEntry>& workspace, const Time::steady_tp& now);
-    bool                     renderWindowLive(PHLWINDOW window, const CBox& box, const Time::steady_tp& now, double alpha = 1.0);
+    bool                     renderWindowLive(PHLWINDOW window, const CBox& box, const Time::steady_tp& now, double alpha = 1.0, const CBox& clipBox = {});
     void                     renderDraggedWindowLive(const Time::steady_tp& now);
     void                     renderPinnedFloatingWindowsLive(const Time::steady_tp& now);
+    void                     resetLayerRenderCache() const;
+    bool                     layerRenderableOnOverviewMonitor(PHLLS layer) const;
+    const SLayerList&        visibleLayersForLevel(uint32_t layer) const;
     void                     forceLayerSurfaceTreeVisibility(PHLLS layer, bool popups);
     void                     renderLiveBackdrop(const Time::steady_tp& now);
-    void                     renderBackdropLayer(PHLLS layer, const Time::steady_tp& now);
+    bool                     renderBackdropLayer(PHLLS layer, const Time::steady_tp& now);
     void                     renderBackdropLayerLevel(uint32_t layer, const Time::steady_tp& now);
-    void                     renderWorkspaceLayer(PHLLS layer, const SP<SWorkspaceEntry>& workspace, const Time::steady_tp& now);
+    bool                     renderWorkspaceLayer(PHLLS layer, const SP<SWorkspaceEntry>& workspace, const Time::steady_tp& now);
     void                     renderWorkspaceLayerLevel(const SP<SWorkspaceEntry>& workspace, uint32_t layer, const Time::steady_tp& now);
     void                     renderHyprlandLayerPhase(const Time::steady_tp& now);
     void                     renderFocusIndicator(SP<SWindowEntry> entry);
@@ -263,9 +311,12 @@ class CScrollOverview : public IOverview {
     struct SWindowEntry {
         PHLWINDOWREF            pWindow;
         CBox                    overviewBox;
-        bool                    liveRenderable = false;
-        bool                    liveVisible    = false;
-        bool                    highlight      = false;
+        bool                    liveRenderable     = false;
+        bool                    liveVisible        = false;
+        bool                    highlight          = false;
+        const void*             lastRenderedWindow = nullptr;
+        Vector2D                lastGeometryPosition;
+        Vector2D                lastGeometrySize;
         UP<CHyprSignalListener> windowCommit;
     };
 
@@ -274,7 +325,32 @@ class CScrollOverview : public IOverview {
         CBox                          box;
         CBox                          overviewBox;
         CBox                          hitBox;
+        double                        lastContentPan = 0.0;
         std::vector<SP<SWindowEntry>> windowEntries;
+    };
+
+    struct SGeometryCacheState {
+        const void* monitor = nullptr;
+        Vector2D    monitorPosition;
+        Vector2D    monitorSize;
+        float       scaleValue = 0.F;
+        Vector2D    viewOffsetValue;
+        size_t      activeWorkspaceIndex = 0;
+        size_t      workspaceCount       = 0;
+    };
+
+    using SSurfaceOwnerCache         = std::unordered_map<const void*, SOverviewSurfaceOwnerCacheEntry>;
+    using SSurfaceFrameCallbackCache = std::unordered_map<const void*, bool>;
+    using SLayerLevelCache           = std::array<SLayerList, LAYER_LEVEL_COUNT>;
+
+    struct SOverviewWindowIndex {
+        const void*                                  monitor           = nullptr;
+        WORKSPACEID                                  activeWorkspaceID = WORKSPACE_INVALID;
+        size_t                                       compositorWindows = 0;
+        SWindowList                                  windows;
+        SWindowList                                  pinnedFloatingWindows;
+        std::unordered_map<WORKSPACEID, SWindowList> tiledWindowsByWorkspace;
+        std::unordered_map<WORKSPACEID, SWindowList> floatingWindowsByWorkspace;
     };
 
     struct SInputState {
@@ -305,6 +381,14 @@ class CScrollOverview : public IOverview {
     mutable std::unordered_map<const void*, SP<SWindowEntry>>    rawWindowEntryLookup;
     mutable std::unordered_map<const void*, SP<SWindowEntry>>    renderedWindowEntryLookup;
     mutable std::unordered_map<const void*, SP<SWorkspaceEntry>> windowEntryWorkspaceLookup;
+
+    mutable SSurfaceOwnerCache                                   surfaceOwnerCache;
+    mutable SSurfaceFrameCallbackCache                           surfaceFrameCallbackCache;
+    mutable SLayerLevelCache                                     visibleLayerLevelCache;
+    mutable std::array<bool, LAYER_LEVEL_COUNT>                  visibleLayerLevelCacheValid = {};
+    mutable SOverviewWindowIndex                                 overviewWindowIndex;
+    mutable bool                                                 overviewWindowIndexDirty = true;
+
     std::vector<SForcedSurfaceVisibility>                        forcedSurfaceVisibility;
     std::vector<SForcedWindowVisibility>                         forcedWindowVisibility;
     int                                                          mouseEdgeNavigationDirection  = 0;
@@ -314,8 +398,13 @@ class CScrollOverview : public IOverview {
     bool                                                         realtimePreviewFrameQueued    = false;
     bool                                                         sendingOverviewFrameCallbacks = false;
     mutable bool                                                 windowEntryLookupsDirty       = true;
+    uint32_t                                                     geometryDirtyFlags            = GEOMETRY_DIRTY_ALL;
+    SGeometryCacheState                                          geometryCacheState;
+    uint64_t                                                     unknownSurfaceDamageDecisions = 0;
+    uint64_t                                                     unknownSurfaceFrameDecisions  = 0;
 
     PHLWINDOWREF                                                 closeOnWindow;
+    PHLWINDOWREF                                                 closeFrameWindow;
     PHLWORKSPACEREF                                              closeOnWorkspace;
     PHLWINDOWREF                                                 keyboardSelectedWindow;
     PHLWINDOWREF                                                 hoveredWindow;
@@ -330,7 +419,7 @@ class CScrollOverview : public IOverview {
     SP<SWindowEntry>                                             windowAt(const Vector2D& local);
     SP<SWindowEntry>                                             windowAtExact(const Vector2D& local);
     SP<SWindowEntry>                                             windowNear(const Vector2D& local);
-    CBox                                                         expandedWindowHitBox(const SP<SWindowEntry>& image) const;
+    CBox                                                         expandedWindowHitBox(const SP<SWindowEntry>& entry) const;
     static double                                                distanceToBox(const Vector2D& point, const CBox& box);
 
     PHLWORKSPACE                                                 startedOn;

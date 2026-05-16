@@ -166,6 +166,7 @@ bool CScrollOverview::setHorizontalPanForWorkspace(const SP<SWorkspaceEntry>& wo
     else
         ANIM->setValueAndWarp(sc<float>(CLAMPED));
 
+    markGeometryCacheDirty(GEOMETRY_DIRTY_WORKSPACE_PAN | GEOMETRY_DIRTY_WINDOW_GEOMETRY);
     damage();
     if (pMonitor)
         g_pCompositor->scheduleFrameForMonitor(pMonitor.lock());
@@ -175,7 +176,8 @@ bool CScrollOverview::setHorizontalPanForWorkspace(const SP<SWorkspaceEntry>& wo
 
 void CScrollOverview::pruneWorkspaceContentPans() {
     std::erase_if(workspaceContentPan, [this](const auto& entry) {
-        return !std::ranges::any_of(workspaceEntries, [&entry](const auto& image) { return image && image->pWorkspace && image->pWorkspace->m_id == entry.first; });
+        return !std::ranges::any_of(
+            workspaceEntries, [&entry](const auto& workspaceEntry) { return workspaceEntry && workspaceEntry->pWorkspace && workspaceEntry->pWorkspace->m_id == entry.first; });
     });
 }
 
@@ -183,12 +185,7 @@ bool CScrollOverview::workspaceHasDisplayableWindows(PHLWORKSPACE workspace) con
     if (!workspace)
         return false;
 
-    for (const auto& w : g_pCompositor->m_windows) {
-        if (windowBelongsToWorkspaceInOverview(w, workspace))
-            return true;
-    }
-
-    return false;
+    return !overviewWindowsForWorkspace(workspace, false).empty() || !overviewWindowsForWorkspace(workspace, true).empty();
 }
 
 bool CScrollOverview::workspaceVisibleInOverview(PHLWORKSPACE workspace) const {
@@ -202,13 +199,11 @@ bool CScrollOverview::workspaceVisibleInOverview(PHLWORKSPACE workspace) const {
 }
 
 bool CScrollOverview::windowBelongsToWorkspaceInOverview(PHLWINDOW window, PHLWORKSPACE workspace) const {
-    if (!validMapped(window) || !workspace || workspace->m_isSpecialWorkspace)
+    if (!window || !workspace || workspace->m_isSpecialWorkspace)
         return false;
 
-    if (window->m_pinned)
-        return pMonitor && window->m_monitor == pMonitor && workspace == pMonitor->m_activeWorkspace;
-
-    return window->m_workspace == workspace;
+    const auto WORKSPACE_ID = overviewWorkspaceIDForWindow(window);
+    return WORKSPACE_ID && *WORKSPACE_ID == workspace->m_id;
 }
 
 bool CScrollOverview::windowCanDragAcrossWorkspaces(PHLWINDOW window) const {

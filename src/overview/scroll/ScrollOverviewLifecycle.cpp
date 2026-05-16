@@ -38,7 +38,7 @@ static void damageMonitor(WP<Hyprutils::Animation::CBaseAnimatedVariable> thispt
     g_pOverview->damage();
 }
 
-static void removeOverview(WP<Hyprutils::Animation::CBaseAnimatedVariable> thisptr) {
+static void removeOverviewNow() {
     const auto OVERVIEW = g_pOverview;
     const auto MONITOR  = OVERVIEW && OVERVIEW->pMonitor ? OVERVIEW->pMonitor.lock() : PHLMONITOR{};
 
@@ -49,6 +49,19 @@ static void removeOverview(WP<Hyprutils::Animation::CBaseAnimatedVariable> thisp
         g_pHyprRenderer->damageMonitor(MONITOR);
         g_pCompositor->scheduleFrameForMonitor(MONITOR);
     }
+}
+
+static void requestNativeWorkspaceHandoff(WP<Hyprutils::Animation::CBaseAnimatedVariable> thisptr) {
+    const auto OVERVIEW = g_pOverview;
+    const auto MONITOR  = OVERVIEW && OVERVIEW->pMonitor ? OVERVIEW->pMonitor.lock() : PHLMONITOR{};
+
+    if (!OVERVIEW || !MONITOR) {
+        removeOverviewNow();
+        return;
+    }
+
+    g_pHyprRenderer->damageMonitor(MONITOR);
+    g_pCompositor->scheduleFrameForMonitor(MONITOR);
 }
 
 static float hyprlerp(const float& from, const float& to, const float perc) {
@@ -66,6 +79,8 @@ static bool focusReasonShouldSyncSelection(Desktop::eFocusReason reason) {
 
 CScrollOverview::~CScrollOverview() {
     g_pHyprOpenGL->makeEGLCurrent();
+    resetSurfacePolicyCache();
+    resetLayerRenderCache();
     if (realtimePreviewTimer) {
         wl_event_source_remove(realtimePreviewTimer);
         realtimePreviewTimer = nullptr;
@@ -163,16 +178,33 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
         if (closing)
             return;
 
+        invalidateOverviewWindowIndex();
         queueRefreshWorkspaceEntries(window && window->m_workspace ? window->m_workspace : (pMonitor ? pMonitor->m_activeWorkspace : nullptr), warpViewport);
     };
 
     auto onWindowOpen  = [refreshForWindow](PHLWINDOW window) { refreshForWindow(window, true); };
-    auto onWindowClose = [refreshForWindow](PHLWINDOW window) { refreshForWindow(window, false); };
+    auto onWindowClose = [this, refreshForWindow](PHLWINDOW window) {
+        if (closing)
+            return;
+
+        invalidateOverviewWindowIndex();
+        if (window && renderedWindowEntryForWindow(window)) {
+            resetSurfacePolicyCache();
+            markGeometryCacheDirty(GEOMETRY_DIRTY_WINDOW_GEOMETRY);
+            damage();
+            if (pMonitor)
+                g_pCompositor->scheduleFrameForMonitor(pMonitor.lock());
+            return;
+        }
+
+        refreshForWindow(window, false);
+    };
 
     auto onWindowMove = [this](PHLWINDOW window, PHLWORKSPACE workspace) {
         if (closing || !pMonitor || !workspace)
             return;
 
+        invalidateOverviewWindowIndex();
         if (workspace->m_monitor == pMonitor || (window && window->m_monitor == pMonitor))
             queueRefreshWorkspaceEntries(workspace, false);
     };
@@ -214,6 +246,7 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
         if (closing || !pMonitor || !workspace || workspace->m_isSpecialWorkspace || workspace->m_monitor != pMonitor)
             return;
 
+        invalidateOverviewWindowIndex();
         queueRefreshWorkspaceEntries(workspace, false);
     };
 
@@ -280,6 +313,7 @@ void CScrollOverview::close(bool switchToSelection) {
                                                       (FOCUSED_WINDOW && FOCUSED_WINDOW->m_workspace ? FOCUSED_WINDOW->m_workspace : pMonitor->m_activeWorkspace);
     const bool TARGET_IS_ACTIVE = (!TARGET_WINDOW || TARGET_WINDOW == FOCUSED_WINDOW) && TARGET_WORKSPACE == pMonitor->m_activeWorkspace;
     const auto FINAL_WORKSPACE  = TARGET_WORKSPACE ? TARGET_WORKSPACE : pMonitor->m_activeWorkspace;
+    closeFrameWindow            = TARGET_WINDOW;
 
     if (switchToSelection && !TARGET_IS_ACTIVE) {
         if (TARGET_WORKSPACE && TARGET_WORKSPACE != pMonitor->m_activeWorkspace)
@@ -302,11 +336,15 @@ void CScrollOverview::close(bool switchToSelection) {
     *viewOffset = Vector2D{};
 
     *scale = 1.F;
+    markGeometryCacheDirty(GEOMETRY_DIRTY_VIEWPORT | GEOMETRY_DIRTY_INSERTION_MARKERS);
 
-    scale->setCallbackOnEnd(removeOverview);
+    scale->setCallbackOnEnd(requestNativeWorkspaceHandoff);
 }
 
 void CScrollOverview::onPreRender() {
+    resetSurfacePolicyCache();
+    resetLayerRenderCache();
+
     if (pMonitor)
         pMonitor->m_solitaryClient.reset();
 
@@ -348,6 +386,23 @@ void CScrollOverview::render() {
     renderOverviewLive(Time::steadyNow());
 }
 
+bool CScrollOverview::shouldRenderNativeWorkspace() const {
+    if (!closing || !scale || !viewOffset)
+        return false;
+
+    static constexpr float  SCALE_EPSILON  = 0.002F;
+    static constexpr double OFFSET_EPSILON = 0.5;
+
+    return std::abs(scale->value() - 1.F) <= SCALE_EPSILON && viewOffset->value().distance({}) <= OFFSET_EPSILON;
+}
+
+void CScrollOverview::finishNativeWorkspaceHandoff() {
+    if (!closing)
+        return;
+
+    removeOverviewNow();
+}
+
 void CScrollOverview::setClosing(bool closing_) {
     closing = closing_;
 }
@@ -360,6 +415,7 @@ void CScrollOverview::resetSwipe() {
 
     (*scale)    = scrollingDefaultZoom();
     m_isSwiping = false;
+    markGeometryCacheDirty(GEOMETRY_DIRTY_VIEWPORT | GEOMETRY_DIRTY_INSERTION_MARKERS);
 }
 
 void CScrollOverview::onSwipeUpdate(double delta) {
@@ -369,6 +425,7 @@ void CScrollOverview::onSwipeUpdate(double delta) {
     const float PERC     = closing ? std::clamp(delta / sc<double>(DISTANCE), 0.0, 1.0) : 1.0 - std::clamp(delta / sc<double>(DISTANCE), 0.0, 1.0);
 
     scale->setValueAndWarp(hyprlerp(1.F, scrollingDefaultZoom(), PERC));
+    markGeometryCacheDirty(GEOMETRY_DIRTY_VIEWPORT | GEOMETRY_DIRTY_INSERTION_MARKERS);
 }
 
 void CScrollOverview::onSwipeEnd() {
@@ -379,4 +436,5 @@ void CScrollOverview::onSwipeEnd() {
 
     (*scale)    = scrollingDefaultZoom();
     m_isSwiping = false;
+    markGeometryCacheDirty(GEOMETRY_DIRTY_VIEWPORT | GEOMETRY_DIRTY_INSERTION_MARKERS);
 }

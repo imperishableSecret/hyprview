@@ -88,6 +88,7 @@ bool CScrollOverview::reanchorViewportToWorkspace(PHLWORKSPACE workspace, bool p
         viewOffset->setValueAndWarp({});
     }
 
+    markGeometryCacheDirty(GEOMETRY_DIRTY_VIEWPORT | GEOMETRY_DIRTY_INSERTION_MARKERS);
     return true;
 }
 
@@ -112,6 +113,7 @@ bool CScrollOverview::setViewportOffset(Vector2D offset, bool warp, bool activat
     else
         *viewOffset = CLAMPED;
 
+    markGeometryCacheDirty(GEOMETRY_DIRTY_VIEWPORT | GEOMETRY_DIRTY_INSERTION_MARKERS);
     syncViewportWorkspaceFromOffset(CLAMPED);
     if (OLD_WORKSPACE_INDEX != viewportCurrentWorkspace)
         syncSelectionToViewport(false);
