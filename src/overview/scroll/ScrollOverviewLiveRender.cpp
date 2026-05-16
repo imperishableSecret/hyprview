@@ -147,7 +147,7 @@ namespace {
         window->m_realSize->value()     = sourceBox.size();
     }
 
-    struct SFadingSnapshotTile {
+    struct SClosedWindowFadeTile {
         SP<Render::ITexture> texture;
         CBox                 sourceBox;
         CBox                 destinationBox;
@@ -155,7 +155,7 @@ namespace {
         float                alpha = 0.F;
     };
 
-    float fadingWindowSnapshotAlpha(PHLWINDOW window, double alpha) {
+    float closedWindowFadeAlpha(PHLWINDOW window, double alpha) {
         if (!window)
             return 0.F;
 
@@ -168,7 +168,7 @@ namespace {
         return lhs.x == rhs.x && lhs.y == rhs.y && lhs.w == rhs.w && lhs.h == rhs.h;
     }
 
-    bool cropSnapshotSourceToTexture(CBox& sourceBox, CBox& destinationBox, const Vector2D& textureSize) {
+    bool cropClosedWindowSourceToTexture(CBox& sourceBox, CBox& destinationBox, const Vector2D& textureSize) {
         const CBox ORIGINAL_SOURCE = sourceBox;
         sourceBox                  = sourceBox.intersection(CBox{{}, textureSize});
         sourceBox.noNegativeSize();
@@ -194,7 +194,8 @@ namespace {
         return !destinationBox.empty();
     }
 
-    std::optional<SFadingSnapshotTile> fadingWindowSnapshotTile(PHLWINDOW window, PHLMONITOR monitor, const CBox& overviewBox, double alpha, const CBox& clipBox) {
+    std::optional<SClosedWindowFadeTile> closedWindowFadeTile(PHLWINDOW window, PHLMONITOR monitor, const CBox& overviewBox, double alpha, const CBox& clipBox) {
+        // Hyprland owns this close-animation snapshot. Hyprview does not cache live overview thumbnails.
         if (!window || !monitor || !window->m_snapshotFB)
             return {};
 
@@ -210,7 +211,7 @@ namespace {
         CBox sourceBox = {window->m_originalClosedPos, window->m_originalClosedSize};
         sourceBox.scale(monitor->m_scale).round();
 
-        if (!cropSnapshotSourceToTexture(sourceBox, destinationBox, TEXTURE->m_size))
+        if (!cropClosedWindowSourceToTexture(sourceBox, destinationBox, TEXTURE->m_size))
             return {};
 
         CBox renderClip = clipBox.empty() ? CBox{} : clipBox.intersection(overviewBox);
@@ -218,20 +219,20 @@ namespace {
         if (!renderClip.empty())
             renderClip.scale(monitor->m_scale).round();
 
-        const float SNAPSHOT_ALPHA = fadingWindowSnapshotAlpha(window, alpha);
-        if (SNAPSHOT_ALPHA <= 0.F)
+        const float FADE_ALPHA = closedWindowFadeAlpha(window, alpha);
+        if (FADE_ALPHA <= 0.F)
             return {};
 
-        return SFadingSnapshotTile{
+        return SClosedWindowFadeTile{
             .texture        = TEXTURE,
             .sourceBox      = sourceBox,
             .destinationBox = destinationBox,
             .clipBox        = renderClip,
-            .alpha          = SNAPSHOT_ALPHA,
+            .alpha          = FADE_ALPHA,
         };
     }
 
-    void submitFadingWindowSnapshotTile(const SFadingSnapshotTile& tile, PHLMONITOR monitor) {
+    void submitClosedWindowFadeTile(const SClosedWindowFadeTile& tile, PHLMONITOR monitor) {
         const auto SAVED_UV_TOP_LEFT     = g_pHyprRenderer->m_renderData.primarySurfaceUVTopLeft;
         const auto SAVED_UV_BOTTOM_RIGHT = g_pHyprRenderer->m_renderData.primarySurfaceUVBottomRight;
         auto       restoreUV             = Hyprutils::Utils::CScopeGuard([SAVED_UV_TOP_LEFT, SAVED_UV_BOTTOM_RIGHT] {
@@ -255,12 +256,12 @@ namespace {
         g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(std::move(data)));
     }
 
-    bool renderFadingWindowSnapshot(PHLWINDOW window, PHLMONITOR monitor, const CBox& overviewBox, double alpha, const CBox& clipBox) {
-        const auto TILE = fadingWindowSnapshotTile(window, monitor, overviewBox, alpha, clipBox);
+    bool renderClosedWindowFade(PHLWINDOW window, PHLMONITOR monitor, const CBox& overviewBox, double alpha, const CBox& clipBox) {
+        const auto TILE = closedWindowFadeTile(window, monitor, overviewBox, alpha, clipBox);
         if (!TILE)
             return false;
 
-        submitFadingWindowSnapshotTile(*TILE, monitor);
+        submitClosedWindowFadeTile(*TILE, monitor);
         flushCurrentRenderPass(monitor);
         return true;
     }
@@ -558,7 +559,7 @@ bool CScrollOverview::renderWindowLive(PHLWINDOW window, const CBox& box, const 
     }
 
     if (window->m_fadingOut)
-        return renderFadingWindowSnapshot(window, MONITOR, box, alpha, clipBox);
+        return renderClosedWindowFade(window, MONITOR, box, alpha, clipBox);
 
     logWindowTelemetry("render-window-force-visible-before", window, box, INTERSECTS);
     forceWindowVisible(window);

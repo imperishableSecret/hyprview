@@ -4,7 +4,6 @@
 
 #include "../../plugin/HyprviewConfig.hpp"
 #include <hyprland/src/desktop/DesktopTypes.hpp>
-#include <hyprland/src/render/Framebuffer.hpp>
 #include <hyprland/src/render/Texture.hpp>
 #include <hyprland/src/helpers/AnimatedVariable.hpp>
 #include <hyprland/src/event/EventBus.hpp>
@@ -330,7 +329,7 @@ class CScrollOverview : public IOverview {
         std::vector<SP<SWindowEntry>> windowEntries;
     };
 
-    struct SGeometryCacheSnapshot {
+    struct SGeometryCacheState {
         const void* monitor = nullptr;
         Vector2D    monitorPosition;
         Vector2D    monitorSize;
@@ -400,7 +399,7 @@ class CScrollOverview : public IOverview {
     bool                                                         sendingOverviewFrameCallbacks = false;
     mutable bool                                                 windowEntryLookupsDirty       = true;
     uint32_t                                                     geometryDirtyFlags            = GEOMETRY_DIRTY_ALL;
-    SGeometryCacheSnapshot                                       geometryCacheSnapshot;
+    SGeometryCacheState                                          geometryCacheState;
     uint64_t                                                     unknownSurfaceDamageDecisions = 0;
     uint64_t                                                     unknownSurfaceFrameDecisions  = 0;
 

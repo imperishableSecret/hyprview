@@ -166,6 +166,7 @@ bool CScrollOverview::windowLiveRenderable(PHLWINDOW window) const {
     if (!pMonitor || !window)
         return false;
 
+    // Closed windows no longer have live surfaces, so use Hyprland's close-animation snapshot.
     if (window->m_fadingOut)
         return window->m_monitor == pMonitor && window->m_snapshotFB && window->m_snapshotFB->getTexture();
 

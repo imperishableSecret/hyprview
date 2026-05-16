@@ -111,7 +111,7 @@ void CScrollOverview::rebuildGeometryCache() {
     if (renderedWindowRemapped)
         invalidateWindowEntryLookups();
 
-    geometryCacheSnapshot = {
+    geometryCacheState = {
         .monitor              = MONITOR.get(),
         .monitorPosition      = MONITOR->m_position,
         .monitorSize          = MONITOR->m_size,
@@ -140,17 +140,17 @@ bool CScrollOverview::geometryCacheNeedsRebuild() const {
     if (!MONITOR || !scale || !viewOffset)
         return true;
 
-    if (geometryCacheSnapshot.monitor != MONITOR.get() || geometryValueChanged(geometryCacheSnapshot.monitorPosition, MONITOR->m_position) ||
-        geometryValueChanged(geometryCacheSnapshot.monitorSize, MONITOR->m_size))
+    if (geometryCacheState.monitor != MONITOR.get() || geometryValueChanged(geometryCacheState.monitorPosition, MONITOR->m_position) ||
+        geometryValueChanged(geometryCacheState.monitorSize, MONITOR->m_size))
         return true;
 
     if (scale->isBeingAnimated() || viewOffset->isBeingAnimated())
         return true;
 
-    if (geometryValueChanged(geometryCacheSnapshot.scaleValue, scale->value()) || geometryValueChanged(geometryCacheSnapshot.viewOffsetValue, viewOffset->value()))
+    if (geometryValueChanged(geometryCacheState.scaleValue, scale->value()) || geometryValueChanged(geometryCacheState.viewOffsetValue, viewOffset->value()))
         return true;
 
-    if (geometryCacheSnapshot.workspaceCount != workspaceEntries.size() || geometryCacheSnapshot.activeWorkspaceIndex != activeWorkspaceEntryIndex())
+    if (geometryCacheState.workspaceCount != workspaceEntries.size() || geometryCacheState.activeWorkspaceIndex != activeWorkspaceEntryIndex())
         return true;
 
     for (const auto& workspaceEntry : workspaceEntries) {
