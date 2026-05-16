@@ -80,6 +80,7 @@ static bool focusReasonShouldSyncSelection(Desktop::eFocusReason reason) {
 CScrollOverview::~CScrollOverview() {
     g_pHyprOpenGL->makeEGLCurrent();
     resetSurfacePolicyCache();
+    resetLayerRenderCache();
     if (realtimePreviewTimer) {
         wl_event_source_remove(realtimePreviewTimer);
         realtimePreviewTimer = nullptr;
@@ -181,7 +182,21 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
     };
 
     auto onWindowOpen  = [refreshForWindow](PHLWINDOW window) { refreshForWindow(window, true); };
-    auto onWindowClose = [refreshForWindow](PHLWINDOW window) { refreshForWindow(window, false); };
+    auto onWindowClose = [this, refreshForWindow](PHLWINDOW window) {
+        if (closing)
+            return;
+
+        if (window && renderedWindowEntryForWindow(window)) {
+            resetSurfacePolicyCache();
+            markGeometryCacheDirty(GEOMETRY_DIRTY_WINDOW_GEOMETRY);
+            damage();
+            if (pMonitor)
+                g_pCompositor->scheduleFrameForMonitor(pMonitor.lock());
+            return;
+        }
+
+        refreshForWindow(window, false);
+    };
 
     auto onWindowMove = [this](PHLWINDOW window, PHLWORKSPACE workspace) {
         if (closing || !pMonitor || !workspace)
@@ -324,6 +339,7 @@ void CScrollOverview::close(bool switchToSelection) {
 
 void CScrollOverview::onPreRender() {
     resetSurfacePolicyCache();
+    resetLayerRenderCache();
 
     if (pMonitor)
         pMonitor->m_solitaryClient.reset();

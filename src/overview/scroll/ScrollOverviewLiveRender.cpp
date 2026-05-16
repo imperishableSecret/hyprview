@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdint>
 #include <format>
+#include <optional>
 #include <string_view>
 #include <vector>
 #include <wlr-layer-shell-unstable-v1.hpp>
@@ -21,6 +22,7 @@
 #include <hyprland/src/managers/input/InputManager.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/render/pass/RendererHintsPassElement.hpp>
+#include <hyprland/src/render/pass/TexPassElement.hpp>
 #include <hyprutils/utils/ScopeGuard.hpp>
 #undef protected
 #undef private
@@ -143,6 +145,124 @@ namespace {
         const Vector2D WORKSPACE_OFFSET = !window->m_pinned && window->m_workspace ? window->m_workspace->m_renderOffset->value() : Vector2D{};
         window->m_realPosition->value() = monitor->m_position + sourceBox.pos() - WORKSPACE_OFFSET;
         window->m_realSize->value()     = sourceBox.size();
+    }
+
+    struct SFadingSnapshotTile {
+        SP<Render::ITexture> texture;
+        CBox                 sourceBox;
+        CBox                 destinationBox;
+        CBox                 clipBox;
+        float                alpha = 0.F;
+    };
+
+    float fadingWindowSnapshotAlpha(PHLWINDOW window, double alpha) {
+        if (!window)
+            return 0.F;
+
+        return sc<float>(std::clamp(alpha * window->alphaValue(Desktop::View::WINDOW_ALPHA_FADE) * window->alphaValue(Desktop::View::WINDOW_ALPHA_FULLSCREEN) *
+                                        window->alphaValue(Desktop::View::WINDOW_ALPHA_LAYOUT),
+                                    0.0, 1.0));
+    }
+
+    bool sameBox(const CBox& lhs, const CBox& rhs) {
+        return lhs.x == rhs.x && lhs.y == rhs.y && lhs.w == rhs.w && lhs.h == rhs.h;
+    }
+
+    bool cropSnapshotSourceToTexture(CBox& sourceBox, CBox& destinationBox, const Vector2D& textureSize) {
+        const CBox ORIGINAL_SOURCE = sourceBox;
+        sourceBox                  = sourceBox.intersection(CBox{{}, textureSize});
+        sourceBox.noNegativeSize();
+        if (sourceBox.empty())
+            return false;
+
+        if (sameBox(sourceBox, ORIGINAL_SOURCE))
+            return true;
+
+        const double SOURCE_WIDTH  = std::max(1.0, ORIGINAL_SOURCE.w);
+        const double SOURCE_HEIGHT = std::max(1.0, ORIGINAL_SOURCE.h);
+        const double LEFT          = (sourceBox.x - ORIGINAL_SOURCE.x) / SOURCE_WIDTH;
+        const double TOP           = (sourceBox.y - ORIGINAL_SOURCE.y) / SOURCE_HEIGHT;
+        const double RIGHT         = (ORIGINAL_SOURCE.x + ORIGINAL_SOURCE.w - sourceBox.x - sourceBox.w) / SOURCE_WIDTH;
+        const double BOTTOM        = (ORIGINAL_SOURCE.y + ORIGINAL_SOURCE.h - sourceBox.y - sourceBox.h) / SOURCE_HEIGHT;
+
+        destinationBox.x += destinationBox.w * LEFT;
+        destinationBox.y += destinationBox.h * TOP;
+        destinationBox.w *= std::max(0.0, 1.0 - LEFT - RIGHT);
+        destinationBox.h *= std::max(0.0, 1.0 - TOP - BOTTOM);
+        destinationBox.round();
+        destinationBox.noNegativeSize();
+        return !destinationBox.empty();
+    }
+
+    std::optional<SFadingSnapshotTile> fadingWindowSnapshotTile(PHLWINDOW window, PHLMONITOR monitor, const CBox& overviewBox, double alpha, const CBox& clipBox) {
+        if (!window || !monitor || !window->m_snapshotFB)
+            return {};
+
+        const auto TEXTURE = window->m_snapshotFB->getTexture();
+        if (!TEXTURE || TEXTURE->m_size.x <= 0 || TEXTURE->m_size.y <= 0 || window->m_originalClosedSize.x <= 0 || window->m_originalClosedSize.y <= 0)
+            return {};
+
+        CBox destinationBox = overviewBox;
+        destinationBox.scale(monitor->m_scale).round();
+        if (destinationBox.empty())
+            return {};
+
+        CBox sourceBox = {window->m_originalClosedPos, window->m_originalClosedSize};
+        sourceBox.scale(monitor->m_scale).round();
+
+        if (!cropSnapshotSourceToTexture(sourceBox, destinationBox, TEXTURE->m_size))
+            return {};
+
+        CBox renderClip = clipBox.empty() ? CBox{} : clipBox.intersection(overviewBox);
+        renderClip.noNegativeSize();
+        if (!renderClip.empty())
+            renderClip.scale(monitor->m_scale).round();
+
+        const float SNAPSHOT_ALPHA = fadingWindowSnapshotAlpha(window, alpha);
+        if (SNAPSHOT_ALPHA <= 0.F)
+            return {};
+
+        return SFadingSnapshotTile{
+            .texture        = TEXTURE,
+            .sourceBox      = sourceBox,
+            .destinationBox = destinationBox,
+            .clipBox        = renderClip,
+            .alpha          = SNAPSHOT_ALPHA,
+        };
+    }
+
+    void submitFadingWindowSnapshotTile(const SFadingSnapshotTile& tile, PHLMONITOR monitor) {
+        const auto SAVED_UV_TOP_LEFT     = g_pHyprRenderer->m_renderData.primarySurfaceUVTopLeft;
+        const auto SAVED_UV_BOTTOM_RIGHT = g_pHyprRenderer->m_renderData.primarySurfaceUVBottomRight;
+        auto       restoreUV             = Hyprutils::Utils::CScopeGuard([SAVED_UV_TOP_LEFT, SAVED_UV_BOTTOM_RIGHT] {
+            g_pHyprRenderer->m_renderData.primarySurfaceUVTopLeft     = SAVED_UV_TOP_LEFT;
+            g_pHyprRenderer->m_renderData.primarySurfaceUVBottomRight = SAVED_UV_BOTTOM_RIGHT;
+        });
+
+        g_pHyprRenderer->m_renderData.primarySurfaceUVTopLeft     = tile.sourceBox.pos() / tile.texture->m_size;
+        g_pHyprRenderer->m_renderData.primarySurfaceUVBottomRight = (tile.sourceBox.pos() + tile.sourceBox.size()) / tile.texture->m_size;
+
+        CRegion                      damage{0, 0, monitor->m_transformedSize.x, monitor->m_transformedSize.y};
+        CTexPassElement::SRenderData data;
+        data.flipEndFrame  = true;
+        data.allowCustomUV = true;
+        data.tex           = tile.texture;
+        data.box           = tile.destinationBox;
+        data.a             = tile.alpha;
+        data.damage        = damage;
+        data.clipBox       = tile.clipBox;
+
+        g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(std::move(data)));
+    }
+
+    bool renderFadingWindowSnapshot(PHLWINDOW window, PHLMONITOR monitor, const CBox& overviewBox, double alpha, const CBox& clipBox) {
+        const auto TILE = fadingWindowSnapshotTile(window, monitor, overviewBox, alpha, clipBox);
+        if (!TILE)
+            return false;
+
+        submitFadingWindowSnapshotTile(*TILE, monitor);
+        flushCurrentRenderPass(monitor);
+        return true;
     }
 }
 
@@ -437,6 +557,9 @@ bool CScrollOverview::renderWindowLive(PHLWINDOW window, const CBox& box, const 
         return false;
     }
 
+    if (window->m_fadingOut)
+        return renderFadingWindowSnapshot(window, MONITOR, box, alpha, clipBox);
+
     logWindowTelemetry("render-window-force-visible-before", window, box, INTERSECTS);
     forceWindowVisible(window);
     forceWindowSurfaceVisibility(window);
@@ -715,6 +838,7 @@ void CScrollOverview::renderOverviewLive(const Time::steady_tp& now) {
         return;
 
     resetSurfacePolicyCache();
+    resetLayerRenderCache();
     ensureGeometryCache();
     ++g_currentTelemetryFrame;
 
@@ -772,6 +896,8 @@ void CScrollOverview::renderOverviewLive(const Time::steady_tp& now) {
                 std::erase_if(workspaceEntry->windowEntries, [](const auto& entry) { return !entry || !entry->pWindow; });
                 invalidateWindowEntryLookups();
                 markGeometryCacheDirty(GEOMETRY_DIRTY_WINDOW_ENTRIES | GEOMETRY_DIRTY_WINDOW_GEOMETRY);
+                if (workspaceEntry->pWorkspace && !workspaceVisibleInOverview(workspaceEntry->pWorkspace))
+                    queueRefreshWorkspaceEntries(pMonitor ? pMonitor->m_activeWorkspace : PHLWORKSPACE{}, false);
             }
         }
 

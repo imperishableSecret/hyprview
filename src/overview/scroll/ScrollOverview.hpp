@@ -9,6 +9,7 @@
 #include <hyprland/src/helpers/AnimatedVariable.hpp>
 #include <hyprland/src/event/EventBus.hpp>
 #include <hyprland/src/helpers/signal/Signal.hpp>
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <optional>
@@ -93,6 +94,7 @@ class CScrollOverview : public IOverview {
     static constexpr uint32_t GEOMETRY_DIRTY_INSERTION_MARKERS = 1 << 5;
     static constexpr uint32_t GEOMETRY_DIRTY_ALL = GEOMETRY_DIRTY_VIEWPORT | GEOMETRY_DIRTY_WORKSPACE_LIST | GEOMETRY_DIRTY_WINDOW_ENTRIES | GEOMETRY_DIRTY_WINDOW_GEOMETRY |
         GEOMETRY_DIRTY_WORKSPACE_PAN | GEOMETRY_DIRTY_INSERTION_MARKERS;
+    static constexpr size_t LAYER_LEVEL_COUNT = 4;
 
     struct SOverviewSurfaceOwner {
         eOverviewSurfaceOwner type = eOverviewSurfaceOwner::UNKNOWN;
@@ -116,6 +118,8 @@ class CScrollOverview : public IOverview {
         PHLWINDOWREF window;
         bool         hidden = false;
     };
+
+    using SLayerList = std::vector<PHLLS>;
 
     struct SDropTarget {
         eDropTargetType     type = eDropTargetType::NONE;
@@ -270,11 +274,14 @@ class CScrollOverview : public IOverview {
     bool                     renderWindowLive(PHLWINDOW window, const CBox& box, const Time::steady_tp& now, double alpha = 1.0, const CBox& clipBox = {});
     void                     renderDraggedWindowLive(const Time::steady_tp& now);
     void                     renderPinnedFloatingWindowsLive(const Time::steady_tp& now);
+    void                     resetLayerRenderCache() const;
+    bool                     layerRenderableOnOverviewMonitor(PHLLS layer) const;
+    const SLayerList&        visibleLayersForLevel(uint32_t layer) const;
     void                     forceLayerSurfaceTreeVisibility(PHLLS layer, bool popups);
     void                     renderLiveBackdrop(const Time::steady_tp& now);
-    void                     renderBackdropLayer(PHLLS layer, const Time::steady_tp& now);
+    bool                     renderBackdropLayer(PHLLS layer, const Time::steady_tp& now);
     void                     renderBackdropLayerLevel(uint32_t layer, const Time::steady_tp& now);
-    void                     renderWorkspaceLayer(PHLLS layer, const SP<SWorkspaceEntry>& workspace, const Time::steady_tp& now);
+    bool                     renderWorkspaceLayer(PHLLS layer, const SP<SWorkspaceEntry>& workspace, const Time::steady_tp& now);
     void                     renderWorkspaceLayerLevel(const SP<SWorkspaceEntry>& workspace, uint32_t layer, const Time::steady_tp& now);
     void                     renderHyprlandLayerPhase(const Time::steady_tp& now);
     void                     renderFocusIndicator(SP<SWindowEntry> entry);
@@ -325,6 +332,7 @@ class CScrollOverview : public IOverview {
 
     using SSurfaceOwnerCache         = std::unordered_map<const void*, SOverviewSurfaceOwnerCacheEntry>;
     using SSurfaceFrameCallbackCache = std::unordered_map<const void*, bool>;
+    using SLayerLevelCache           = std::array<SLayerList, LAYER_LEVEL_COUNT>;
 
     struct SInputState {
         ePointerMode                    mode = ePointerMode::IDLE;
@@ -357,6 +365,8 @@ class CScrollOverview : public IOverview {
 
     mutable SSurfaceOwnerCache                                   surfaceOwnerCache;
     mutable SSurfaceFrameCallbackCache                           surfaceFrameCallbackCache;
+    mutable SLayerLevelCache                                     visibleLayerLevelCache;
+    mutable std::array<bool, LAYER_LEVEL_COUNT>                  visibleLayerLevelCacheValid = {};
 
     std::vector<SForcedSurfaceVisibility>                        forcedSurfaceVisibility;
     std::vector<SForcedWindowVisibility>                         forcedWindowVisibility;

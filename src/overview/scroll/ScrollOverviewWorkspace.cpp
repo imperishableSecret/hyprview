@@ -203,11 +203,17 @@ bool CScrollOverview::workspaceVisibleInOverview(PHLWORKSPACE workspace) const {
 }
 
 bool CScrollOverview::windowBelongsToWorkspaceInOverview(PHLWINDOW window, PHLWORKSPACE workspace) const {
-    if (!validMapped(window) || !workspace || workspace->m_isSpecialWorkspace)
+    if (!window || !workspace || workspace->m_isSpecialWorkspace)
+        return false;
+
+    if (!validMapped(window) && !window->m_fadingOut)
         return false;
 
     if (window->m_pinned)
         return pMonitor && window->m_monitor == pMonitor && workspace == pMonitor->m_activeWorkspace;
+
+    if (window->m_fadingOut && !window->m_workspace)
+        return window->m_monitor == pMonitor && window->workspaceID() == workspace->m_id;
 
     return window->m_workspace == workspace;
 }

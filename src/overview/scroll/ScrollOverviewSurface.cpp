@@ -482,9 +482,9 @@ bool CScrollOverview::shouldSuppressRenderDamage() const {
             return false;
     }
 
-    for (const auto LAYER : {ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND, ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM, ZWLR_LAYER_SHELL_V1_LAYER_TOP, ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY}) {
-        for (const auto& layerRef : MONITOR->m_layerSurfaceLayers[LAYER]) {
-            if (layerHasOverviewAnimation(layerRef.lock()))
+    for (uint32_t layer = 0; layer < LAYER_LEVEL_COUNT; ++layer) {
+        for (const auto& LAYER : visibleLayersForLevel(layer)) {
+            if (layerHasOverviewAnimation(LAYER))
                 return false;
         }
     }

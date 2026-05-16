@@ -6,6 +6,7 @@
 #define protected public
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/helpers/Monitor.hpp>
+#include <hyprland/src/desktop/view/Window.hpp>
 #include <hyprland/src/protocols/XDGShell.hpp>
 #include <hyprland/src/protocols/core/Compositor.hpp>
 #include <hyprland/src/xwayland/XSurface.hpp>
@@ -77,7 +78,13 @@ void CScrollOverview::rebuildAllWorkspaceEntries() {
 }
 
 bool CScrollOverview::windowLiveRenderable(PHLWINDOW window) const {
-    if (!pMonitor || !validMapped(window))
+    if (!pMonitor || !window)
+        return false;
+
+    if (window->m_fadingOut)
+        return window->m_monitor == pMonitor && window->m_snapshotFB && window->m_snapshotFB->getTexture();
+
+    if (!validMapped(window))
         return false;
 
     if (window->m_isX11)
