@@ -16,6 +16,7 @@ void CScrollOverview::rebuildWorkspaceEntries(PHLWORKSPACE workspace) {
     if (!refreshingWorkspaceEntries && pMonitor->m_activeWorkspace != startedOn && !closing)
         onWorkspaceChange();
 
+    resetSurfacePolicyCache();
     invalidateWindowEntryLookups();
     markGeometryCacheDirty(GEOMETRY_DIRTY_WINDOW_ENTRIES | GEOMETRY_DIRTY_WINDOW_GEOMETRY);
 

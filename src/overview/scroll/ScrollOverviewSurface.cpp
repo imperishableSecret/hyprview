@@ -23,6 +23,7 @@
 #undef private
 
 static constexpr std::chrono::milliseconds OVERVIEW_WINDOW_FRAME_INTERVAL = std::chrono::milliseconds(33);
+static constexpr size_t                    SURFACE_POLICY_CACHE_LIMIT     = 512;
 
 static bool                                windowHasOverviewAnimation(PHLWINDOW window) {
     if (!window)
@@ -42,7 +43,12 @@ static bool layerHasOverviewAnimation(PHLLS layer) {
     return layer->m_realPosition->isBeingAnimated() || layer->m_realSize->isBeingAnimated() || layer->m_alpha->isBeingAnimated();
 }
 
-CScrollOverview::SOverviewSurfaceOwner CScrollOverview::overviewSurfaceOwner(SP<CWLSurfaceResource> surface) const {
+void CScrollOverview::resetSurfacePolicyCache() const {
+    surfaceOwnerCache.clear();
+    surfaceFrameCallbackCache.clear();
+}
+
+CScrollOverview::SOverviewSurfaceOwner CScrollOverview::uncachedOverviewSurfaceOwner(SP<CWLSurfaceResource> surface) const {
     if (!surface)
         return {};
 
@@ -75,6 +81,42 @@ CScrollOverview::SOverviewSurfaceOwner CScrollOverview::overviewSurfaceOwner(SP<
         return {.type = eOverviewSurfaceOwner::WINDOW_POPUP, .window = WINDOW, .monitor = WINDOW->m_monitor.lock()};
 
     return {};
+}
+
+CScrollOverview::SOverviewSurfaceOwner CScrollOverview::overviewSurfaceOwner(SP<CWLSurfaceResource> surface) const {
+    if (!surface)
+        return {};
+
+    const auto KEY = surface.get();
+    if (const auto IT = surfaceOwnerCache.find(KEY); IT != surfaceOwnerCache.end()) {
+        const auto& ENTRY = IT->second;
+        switch (ENTRY.type) {
+            case eOverviewSurfaceOwner::WINDOW:
+            case eOverviewSurfaceOwner::WINDOW_POPUP: {
+                const auto WINDOW = ENTRY.window.lock();
+                if (WINDOW)
+                    return {.type = ENTRY.type, .window = WINDOW, .monitor = WINDOW->m_monitor.lock()};
+                break;
+            }
+            case eOverviewSurfaceOwner::LAYER:
+            case eOverviewSurfaceOwner::LAYER_POPUP: {
+                const auto LAYER = ENTRY.layer.lock();
+                if (LAYER)
+                    return {.type = ENTRY.type, .layer = LAYER, .monitor = LAYER->m_monitor.lock()};
+                break;
+            }
+            case eOverviewSurfaceOwner::UNKNOWN: return {};
+        }
+
+        surfaceOwnerCache.erase(IT);
+    }
+
+    if (surfaceOwnerCache.size() > SURFACE_POLICY_CACHE_LIMIT)
+        surfaceOwnerCache.clear();
+
+    const auto OWNER = uncachedOverviewSurfaceOwner(surface);
+    surfaceOwnerCache.emplace(KEY, SOverviewSurfaceOwnerCacheEntry{.type = OWNER.type, .window = OWNER.window, .layer = OWNER.layer});
+    return OWNER;
 }
 
 bool CScrollOverview::surfaceOwnerBelongsToOverviewMonitor(const SOverviewSurfaceOwner& owner, PHLMONITOR monitor) const {
@@ -114,6 +156,10 @@ bool CScrollOverview::surfaceTreeHasFrameCallbacks(SP<CWLSurfaceResource> surfac
     if (!surface)
         return false;
 
+    const auto KEY = surface.get();
+    if (const auto IT = surfaceFrameCallbackCache.find(KEY); IT != surfaceFrameCallbackCache.end())
+        return IT->second;
+
     bool hasCallbacks = false;
     surface->breadthfirst(
         [&hasCallbacks](SP<CWLSurfaceResource> child, const Vector2D&, void*) {
@@ -122,6 +168,10 @@ bool CScrollOverview::surfaceTreeHasFrameCallbacks(SP<CWLSurfaceResource> surfac
         },
         nullptr);
 
+    if (surfaceFrameCallbackCache.size() > SURFACE_POLICY_CACHE_LIMIT)
+        surfaceFrameCallbackCache.clear();
+
+    surfaceFrameCallbackCache.emplace(KEY, hasCallbacks);
     return hasCallbacks;
 }
 
@@ -209,8 +259,14 @@ bool CScrollOverview::shouldHandleSurfaceDamage(SP<CWLSurfaceResource> surface) 
     ensureGeometryCache();
 
     const auto OWNER = overviewSurfaceOwner(surface);
-    if (OWNER.type == eOverviewSurfaceOwner::UNKNOWN)
+    if (OWNER.type == eOverviewSurfaceOwner::UNKNOWN) {
+        const auto COUNT = ++unknownSurfaceDamageDecisions;
+        Hyprview::telemetryLogLazy([&] {
+            return std::format("event=surface-owner-unknown policy=damage count={} surface={:x} overviewMonitor={} ownerCache={} callbackCache={}", COUNT,
+                               reinterpret_cast<uintptr_t>(surface.get()), MONITOR ? MONITOR->m_name : "<none>", surfaceOwnerCache.size(), surfaceFrameCallbackCache.size());
+        });
         return true;
+    }
 
     auto ownerName = [](eOverviewSurfaceOwner type) -> std::string_view {
         switch (type) {
@@ -297,8 +353,14 @@ bool CScrollOverview::shouldAllowSurfaceFrame(SP<CWLSurfaceResource> surface, co
     ensureGeometryCache();
 
     const auto OWNER = overviewSurfaceOwner(surface);
-    if (OWNER.type == eOverviewSurfaceOwner::UNKNOWN)
+    if (OWNER.type == eOverviewSurfaceOwner::UNKNOWN) {
+        const auto COUNT = ++unknownSurfaceFrameDecisions;
+        Hyprview::telemetryLogLazy([&] {
+            return std::format("event=surface-owner-unknown policy=frame count={} surface={:x} overviewMonitor={} ownerCache={} callbackCache={}", COUNT,
+                               reinterpret_cast<uintptr_t>(surface.get()), MONITOR ? MONITOR->m_name : "<none>", surfaceOwnerCache.size(), surfaceFrameCallbackCache.size());
+        });
         return true;
+    }
 
     auto ownerName = [](eOverviewSurfaceOwner type) -> std::string_view {
         switch (type) {
@@ -461,6 +523,7 @@ int CScrollOverview::realtimePreviewTimerCallback(void* data) {
     OVERVIEW->realtimePreviewTimerArmed  = false;
     OVERVIEW->realtimePreviewTimerDue    = {};
     OVERVIEW->realtimePreviewFrameQueued = false;
+    OVERVIEW->resetSurfacePolicyCache();
 
     if (OVERVIEW->closing || !OVERVIEW->pMonitor)
         return 0;
@@ -478,13 +541,11 @@ void CScrollOverview::sendOverviewFrameCallbacks(const Time::steady_tp& now) {
     if (!MONITOR)
         return;
 
-    if (closing) {
+    if (closing)
         sendCloseTargetFrameCallback(now);
-        return;
-    }
 
     bool       sentWindowFrame    = false;
-    const bool CAN_FRAME_WINDOW   = shouldAllowRealtimePreviewFrame();
+    const bool CAN_FRAME_WINDOW   = closing || shouldAllowRealtimePreviewFrame();
     const bool PREVIOUS_SENDING   = sendingOverviewFrameCallbacks;
     sendingOverviewFrameCallbacks = CAN_FRAME_WINDOW;
     std::vector<PHLWINDOW> framedWindows;
@@ -538,4 +599,5 @@ void CScrollOverview::sendOverviewFrameCallbacks(const Time::steady_tp& now) {
         lastRealtimePreviewFrame = now;
 
     realtimePreviewFrameQueued = false;
+    resetSurfacePolicyCache();
 }

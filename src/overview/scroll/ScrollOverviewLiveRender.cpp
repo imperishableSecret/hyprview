@@ -481,6 +481,13 @@ bool CScrollOverview::renderWindowLive(PHLWINDOW window, const CBox& box, const 
     modif.modifs.emplace_back(Render::SRenderModifData::RMOD_TYPE_SCALE, RENDER_SCALE);
     modif.modifs.emplace_back(Render::SRenderModifData::RMOD_TYPE_TRANSLATE, RENDER_TRANSLATE);
 
+    const bool ALLOW_TARGET_FEEDBACK           = closing && window == closeTargetWindow();
+    const bool PREVIOUS_BLOCK_SURFACE_FEEDBACK = g_pHyprRenderer->m_bBlockSurfaceFeedback;
+    auto restoreSurfaceFeedback = Hyprutils::Utils::CScopeGuard([PREVIOUS_BLOCK_SURFACE_FEEDBACK] { g_pHyprRenderer->m_bBlockSurfaceFeedback = PREVIOUS_BLOCK_SURFACE_FEEDBACK; });
+
+    if (ALLOW_TARGET_FEEDBACK)
+        g_pHyprRenderer->m_bBlockSurfaceFeedback = false;
+
     projectWindowGeometryForLiveRender(window, MONITOR, sourceBox);
     g_pHyprRenderer->m_renderPass.add(makeUnique<CRendererHintsPassElement>(CRendererHintsPassElement::SData{.renderModif = modif}));
     g_pHyprRenderer->renderWindow(window, MONITOR, now, true, RENDER_PASS_ALL, false, true);
@@ -707,6 +714,7 @@ void CScrollOverview::renderOverviewLive(const Time::steady_tp& now) {
     if (!MONITOR)
         return;
 
+    resetSurfacePolicyCache();
     ensureGeometryCache();
     ++g_currentTelemetryFrame;
 

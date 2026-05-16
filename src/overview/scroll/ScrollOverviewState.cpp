@@ -40,6 +40,7 @@ void CScrollOverview::refreshWorkspaceEntries(PHLWORKSPACE preferredViewport, bo
                            workspaceID(pMonitor->m_activeWorkspace));
     });
 
+    resetSurfacePolicyCache();
     invalidateWindowEntryLookups();
     markGeometryCacheDirty(GEOMETRY_DIRTY_WORKSPACE_LIST | GEOMETRY_DIRTY_WINDOW_ENTRIES | GEOMETRY_DIRTY_INSERTION_MARKERS);
     workspaceEntries.clear();

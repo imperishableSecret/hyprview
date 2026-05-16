@@ -101,6 +101,12 @@ class CScrollOverview : public IOverview {
         PHLMONITOR            monitor;
     };
 
+    struct SOverviewSurfaceOwnerCacheEntry {
+        eOverviewSurfaceOwner type = eOverviewSurfaceOwner::UNKNOWN;
+        PHLWINDOWREF          window;
+        PHLLSREF              layer;
+    };
+
     struct SForcedSurfaceVisibility {
         SP<CWLSurfaceResource> surface;
         CRegion                visibleRegion;
@@ -222,6 +228,8 @@ class CScrollOverview : public IOverview {
     void                     renderWorkspaceAnnotations();
     void                     renderWorkspaceShadows();
     void                     renderInsertionMarkers();
+    void                     resetSurfacePolicyCache() const;
+    SOverviewSurfaceOwner    uncachedOverviewSurfaceOwner(SP<CWLSurfaceResource> surface) const;
     SOverviewSurfaceOwner    overviewSurfaceOwner(SP<CWLSurfaceResource> surface) const;
     bool                     surfaceOwnerBelongsToOverviewMonitor(const SOverviewSurfaceOwner& owner, PHLMONITOR monitor) const;
     bool                     overviewWindowVisible(PHLWINDOW window) const;
@@ -315,6 +323,9 @@ class CScrollOverview : public IOverview {
         size_t      workspaceCount       = 0;
     };
 
+    using SSurfaceOwnerCache         = std::unordered_map<const void*, SOverviewSurfaceOwnerCacheEntry>;
+    using SSurfaceFrameCallbackCache = std::unordered_map<const void*, bool>;
+
     struct SInputState {
         ePointerMode                    mode = ePointerMode::IDLE;
         Vector2D                        pressPosLocal;
@@ -343,6 +354,10 @@ class CScrollOverview : public IOverview {
     mutable std::unordered_map<const void*, SP<SWindowEntry>>    rawWindowEntryLookup;
     mutable std::unordered_map<const void*, SP<SWindowEntry>>    renderedWindowEntryLookup;
     mutable std::unordered_map<const void*, SP<SWorkspaceEntry>> windowEntryWorkspaceLookup;
+
+    mutable SSurfaceOwnerCache                                   surfaceOwnerCache;
+    mutable SSurfaceFrameCallbackCache                           surfaceFrameCallbackCache;
+
     std::vector<SForcedSurfaceVisibility>                        forcedSurfaceVisibility;
     std::vector<SForcedWindowVisibility>                         forcedWindowVisibility;
     int                                                          mouseEdgeNavigationDirection  = 0;
@@ -354,6 +369,8 @@ class CScrollOverview : public IOverview {
     mutable bool                                                 windowEntryLookupsDirty       = true;
     uint32_t                                                     geometryDirtyFlags            = GEOMETRY_DIRTY_ALL;
     SGeometryCacheSnapshot                                       geometryCacheSnapshot;
+    uint64_t                                                     unknownSurfaceDamageDecisions = 0;
+    uint64_t                                                     unknownSurfaceFrameDecisions  = 0;
 
     PHLWINDOWREF                                                 closeOnWindow;
     PHLWINDOWREF                                                 closeFrameWindow;

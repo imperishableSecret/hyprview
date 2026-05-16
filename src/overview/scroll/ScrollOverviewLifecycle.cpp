@@ -51,8 +51,17 @@ static void removeOverviewNow() {
     }
 }
 
-static void removeOverview(WP<Hyprutils::Animation::CBaseAnimatedVariable> thisptr) {
-    removeOverviewNow();
+static void requestNativeWorkspaceHandoff(WP<Hyprutils::Animation::CBaseAnimatedVariable> thisptr) {
+    const auto OVERVIEW = g_pOverview;
+    const auto MONITOR  = OVERVIEW && OVERVIEW->pMonitor ? OVERVIEW->pMonitor.lock() : PHLMONITOR{};
+
+    if (!OVERVIEW || !MONITOR) {
+        removeOverviewNow();
+        return;
+    }
+
+    g_pHyprRenderer->damageMonitor(MONITOR);
+    g_pCompositor->scheduleFrameForMonitor(MONITOR);
 }
 
 static float hyprlerp(const float& from, const float& to, const float perc) {
@@ -70,6 +79,7 @@ static bool focusReasonShouldSyncSelection(Desktop::eFocusReason reason) {
 
 CScrollOverview::~CScrollOverview() {
     g_pHyprOpenGL->makeEGLCurrent();
+    resetSurfacePolicyCache();
     if (realtimePreviewTimer) {
         wl_event_source_remove(realtimePreviewTimer);
         realtimePreviewTimer = nullptr;
@@ -309,10 +319,12 @@ void CScrollOverview::close(bool switchToSelection) {
     *scale = 1.F;
     markGeometryCacheDirty(GEOMETRY_DIRTY_VIEWPORT | GEOMETRY_DIRTY_INSERTION_MARKERS);
 
-    scale->setCallbackOnEnd(removeOverview);
+    scale->setCallbackOnEnd(requestNativeWorkspaceHandoff);
 }
 
 void CScrollOverview::onPreRender() {
+    resetSurfacePolicyCache();
+
     if (pMonitor)
         pMonitor->m_solitaryClient.reset();
 
