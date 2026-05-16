@@ -443,15 +443,15 @@ bool CScrollOverview::snapMousePanForWorkspace(const SP<SWorkspaceEntry>& worksp
     SP<SWindowEntry> target;
     double           bestScore = std::numeric_limits<double>::max();
 
-    for (const auto& image : workspace->windowEntries) {
-        if (!image || !image->pWindow || image->overviewBox.empty())
+    for (const auto& entry : workspace->windowEntries) {
+        if (!entry || !entry->pWindow || entry->overviewBox.empty())
             continue;
 
-        const auto WINDOW = image->pWindow.lock();
+        const auto WINDOW = entry->pWindow.lock();
         if (!WINDOW || WINDOW->m_isFloating)
             continue;
 
-        const double CENTER = image->overviewBox.middle().x;
+        const double CENTER = entry->overviewBox.middle().x;
         if (direction > 0 && CENTER <= TARGET_X + CENTER_GRACE)
             continue;
         if (direction < 0 && CENTER >= TARGET_X - CENTER_GRACE)
@@ -460,7 +460,7 @@ bool CScrollOverview::snapMousePanForWorkspace(const SP<SWorkspaceEntry>& worksp
         const double score = std::abs(CENTER - TARGET_X);
 
         if (score < bestScore) {
-            target    = image;
+            target    = entry;
             bestScore = score;
         }
     }
@@ -559,12 +559,12 @@ void CScrollOverview::updateMouseSnapPanNavigation(const Vector2D& local) {
 
     SP<SWorkspaceEntry> WORKSPACE;
     for (auto it = workspaceEntries.rbegin(); it != workspaceEntries.rend(); ++it) {
-        const auto& image = *it;
-        if (!image || !image->pWorkspace)
+        const auto& entry = *it;
+        if (!entry || !entry->pWorkspace)
             continue;
 
-        if (local.y >= image->overviewBox.y && local.y <= image->overviewBox.y + image->overviewBox.h) {
-            WORKSPACE = image;
+        if (local.y >= entry->overviewBox.y && local.y <= entry->overviewBox.y + entry->overviewBox.h) {
+            WORKSPACE = entry;
             break;
         }
     }

@@ -164,13 +164,13 @@ class CScrollOverview : public IOverview {
     void                     keyboardTakeoverMouse();
     void                     releaseKeyboardTakeoverMouse(bool allowHoverSelection);
     void                     syncSelectionToViewport(bool damageOnChange = true);
-    void                     setKeyboardSelection(SP<SWindowEntry> image, bool lockedToKeyboard, bool damageOnChange = true);
+    void                     setKeyboardSelection(SP<SWindowEntry> entry, bool lockedToKeyboard, bool damageOnChange = true);
     SP<SWindowEntry>         entryForKeyboardSelection() const;
     SP<SWindowEntry>         selectableEntryForWorkspace(const SP<SWorkspaceEntry>& workspace) const;
     SP<SWorkspaceEntry>      workspaceEntryForWindow(PHLWINDOW window) const;
-    SP<SWorkspaceEntry>      workspaceEntryForWindowEntry(const SP<SWindowEntry>& image) const;
-    void                     ensureSelectionVisible(SP<SWindowEntry> image);
-    void                     centerWindowEntryInScrollingWorkspace(SP<SWindowEntry> image, bool animate = true);
+    SP<SWorkspaceEntry>      workspaceEntryForWindowEntry(const SP<SWindowEntry>& entry) const;
+    void                     ensureSelectionVisible(SP<SWindowEntry> entry);
+    void                     centerWindowEntryInScrollingWorkspace(SP<SWindowEntry> entry, bool animate = true);
     bool                     moveHorizontalSelection(bool right);
     bool                     moveViewportWorkspace(bool up);
     bool                     setViewportWorkspace(size_t index, bool warp = false, bool activate = false);
@@ -246,15 +246,15 @@ class CScrollOverview : public IOverview {
     bool                     overviewBoxIntersectsMonitor(const CBox& box) const;
     bool                     overviewBoxIntersectsViewport(const CBox& box, double margin = 0.0) const;
     bool                     workspaceIntersectsViewport(const SP<SWorkspaceEntry>& workspace, double margin = 0.0) const;
-    bool                     windowEntryIntersectsWorkspaceViewport(const SP<SWindowEntry>& image, const SP<SWorkspaceEntry>& workspace, double margin = 0.0) const;
+    bool                     windowEntryIntersectsWorkspaceViewport(const SP<SWindowEntry>& entry, const SP<SWorkspaceEntry>& workspace, double margin = 0.0) const;
     bool                     overviewWindowOccludedByFullscreen(PHLWINDOW window) const;
     PHLWINDOW                overviewWindowToRender(PHLWINDOW window) const;
-    PHLWINDOW                windowForEntry(const SP<SWindowEntry>& image) const;
+    PHLWINDOW                windowForEntry(const SP<SWindowEntry>& entry) const;
     void                     rebuildWindowEntryLookups() const;
     void                     invalidateWindowEntryLookups() const;
     SP<SWindowEntry>         renderedWindowEntryForWindow(PHLWINDOW window) const;
-    bool                     windowEntryRenderable(const SP<SWindowEntry>& image) const;
-    bool                     windowEntryVisible(const SP<SWindowEntry>& image, const SP<SWorkspaceEntry>& workspace = nullptr) const;
+    bool                     windowEntryRenderable(const SP<SWindowEntry>& entry) const;
+    bool                     windowEntryVisible(const SP<SWindowEntry>& entry, const SP<SWorkspaceEntry>& workspace = nullptr) const;
 
     void                     invalidateOverviewWindowIndex() const;
     SOptionalWorkspaceID     overviewWorkspaceIDForWindow(PHLWINDOW window) const;
@@ -420,7 +420,7 @@ class CScrollOverview : public IOverview {
     SP<SWindowEntry>                                             windowAt(const Vector2D& local);
     SP<SWindowEntry>                                             windowAtExact(const Vector2D& local);
     SP<SWindowEntry>                                             windowNear(const Vector2D& local);
-    CBox                                                         expandedWindowHitBox(const SP<SWindowEntry>& image) const;
+    CBox                                                         expandedWindowHitBox(const SP<SWindowEntry>& entry) const;
     static double                                                distanceToBox(const Vector2D& point, const CBox& box);
 
     PHLWORKSPACE                                                 startedOn;

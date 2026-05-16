@@ -176,7 +176,8 @@ bool CScrollOverview::setHorizontalPanForWorkspace(const SP<SWorkspaceEntry>& wo
 
 void CScrollOverview::pruneWorkspaceContentPans() {
     std::erase_if(workspaceContentPan, [this](const auto& entry) {
-        return !std::ranges::any_of(workspaceEntries, [&entry](const auto& image) { return image && image->pWorkspace && image->pWorkspace->m_id == entry.first; });
+        return !std::ranges::any_of(
+            workspaceEntries, [&entry](const auto& workspaceEntry) { return workspaceEntry && workspaceEntry->pWorkspace && workspaceEntry->pWorkspace->m_id == entry.first; });
     });
 }
 

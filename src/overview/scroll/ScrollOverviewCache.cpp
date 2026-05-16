@@ -156,9 +156,9 @@ void CScrollOverview::rebuildWorkspaceEntries(PHLWORKSPACE workspace) {
 }
 
 void CScrollOverview::rebuildAllWorkspaceEntries() {
-    for (const auto& image : workspaceEntries) {
-        if (image && image->pWorkspace)
-            rebuildWorkspaceEntries(image->pWorkspace);
+    for (const auto& entry : workspaceEntries) {
+        if (entry && entry->pWorkspace)
+            rebuildWorkspaceEntries(entry->pWorkspace);
     }
 }
 

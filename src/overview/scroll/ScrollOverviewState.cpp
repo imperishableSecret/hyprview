@@ -37,7 +37,7 @@ void CScrollOverview::refreshWorkspaceEntries(PHLWORKSPACE preferredViewport, bo
         PHLWORKSPACE{};
 
     Hyprview::telemetryLogLazy([&] {
-        return std::format("event=refresh-workspaces-start preferred={} fallback={} warp={} oldImages={} viewportIndex={} activeWorkspace={}", workspaceID(preferredViewport),
+        return std::format("event=refresh-workspaces-start preferred={} fallback={} warp={} oldEntries={} viewportIndex={} activeWorkspace={}", workspaceID(preferredViewport),
                            workspaceID(FALLBACK_VIEWPORT), Hyprview::boolToken(warpViewport), workspaceEntries.size(), viewportCurrentWorkspace,
                            workspaceID(pMonitor->m_activeWorkspace));
     });
@@ -58,7 +58,7 @@ void CScrollOverview::refreshWorkspaceEntries(PHLWORKSPACE preferredViewport, bo
     for (size_t i = 0; i < workspaceEntries.size(); ++i) {
         const auto& ENTRY = workspaceEntries[i];
         Hyprview::telemetryLogLazy([&] {
-            return std::format("event=refresh-workspace-image index={} workspace={} name={} displayable={} scrolling={}", i,
+            return std::format("event=refresh-workspace-entry index={} workspace={} name={} displayable={} scrolling={}", i,
                                workspaceID(ENTRY ? ENTRY->pWorkspace : PHLWORKSPACE{}), ENTRY && ENTRY->pWorkspace ? ENTRY->pWorkspace->m_name : "<none>",
                                Hyprview::boolToken(ENTRY && workspaceHasDisplayableWindows(ENTRY->pWorkspace)),
                                Hyprview::boolToken(ENTRY && workspaceUsesScrollingLayout(ENTRY->pWorkspace)));

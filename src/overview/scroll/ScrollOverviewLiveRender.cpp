@@ -276,11 +276,11 @@ PHLWINDOW CScrollOverview::overviewWindowToRender(PHLWINDOW window) const {
     return window;
 }
 
-PHLWINDOW CScrollOverview::windowForEntry(const SP<SWindowEntry>& image) const {
-    if (!image)
+PHLWINDOW CScrollOverview::windowForEntry(const SP<SWindowEntry>& entry) const {
+    if (!entry)
         return nullptr;
 
-    return overviewWindowToRender(image->pWindow.lock());
+    return overviewWindowToRender(entry->pWindow.lock());
 }
 
 void CScrollOverview::rebuildWindowEntryLookups() const {
@@ -330,17 +330,17 @@ SP<CScrollOverview::SWindowEntry> CScrollOverview::renderedWindowEntryForWindow(
     return IT == renderedWindowEntryLookup.end() ? nullptr : IT->second;
 }
 
-bool CScrollOverview::windowEntryRenderable(const SP<SWindowEntry>& image) const {
-    return windowLiveRenderable(windowForEntry(image));
+bool CScrollOverview::windowEntryRenderable(const SP<SWindowEntry>& entry) const {
+    return windowLiveRenderable(windowForEntry(entry));
 }
 
-bool CScrollOverview::windowEntryVisible(const SP<SWindowEntry>& image, const SP<SWorkspaceEntry>& workspace) const {
-    if (!image)
+bool CScrollOverview::windowEntryVisible(const SP<SWindowEntry>& entry, const SP<SWorkspaceEntry>& workspace) const {
+    if (!entry)
         return false;
 
-    const auto WINDOW     = windowForEntry(image);
-    const bool INTERSECTS = workspace ? windowEntryIntersectsWorkspaceViewport(image, workspace) : overviewBoxIntersectsMonitor(image->overviewBox);
-    return image && WINDOW && image->liveRenderable && !image->overviewBox.empty() && INTERSECTS && !overviewWindowOccludedByFullscreen(WINDOW);
+    const auto WINDOW     = windowForEntry(entry);
+    const bool INTERSECTS = workspace ? windowEntryIntersectsWorkspaceViewport(entry, workspace) : overviewBoxIntersectsMonitor(entry->overviewBox);
+    return entry && WINDOW && entry->liveRenderable && !entry->overviewBox.empty() && INTERSECTS && !overviewWindowOccludedByFullscreen(WINDOW);
 }
 
 CBox CScrollOverview::overviewViewportBox() const {
@@ -400,8 +400,8 @@ bool CScrollOverview::workspaceIntersectsViewport(const SP<SWorkspaceEntry>& wor
     return workspace && workspace->pWorkspace && overviewBoxIntersectsViewport(workspace->overviewBox, margin);
 }
 
-bool CScrollOverview::windowEntryIntersectsWorkspaceViewport(const SP<SWindowEntry>& image, const SP<SWorkspaceEntry>& workspace, double margin) const {
-    if (!image || image->overviewBox.empty())
+bool CScrollOverview::windowEntryIntersectsWorkspaceViewport(const SP<SWindowEntry>& entry, const SP<SWorkspaceEntry>& workspace, double margin) const {
+    if (!entry || entry->overviewBox.empty())
         return false;
 
     CBox viewport = expandedOverviewViewportBox(margin);
@@ -410,7 +410,7 @@ bool CScrollOverview::windowEntryIntersectsWorkspaceViewport(const SP<SWindowEnt
 
     CBox visibleArea = workspace ? workspaceRenderClipBox(workspace).intersection(viewport) : viewport;
     visibleArea.noNegativeSize();
-    return !visibleArea.empty() && image->overviewBox.overlaps(visibleArea);
+    return !visibleArea.empty() && entry->overviewBox.overlaps(visibleArea);
 }
 
 bool CScrollOverview::overviewWindowOccludedByFullscreen(PHLWINDOW window) const {
@@ -622,7 +622,7 @@ bool CScrollOverview::renderWindowLive(PHLWINDOW window, const CBox& box, const 
 
 void CScrollOverview::renderWorkspaceLive(const SP<SWorkspaceEntry>& workspaceEntry, const Time::steady_tp& now) {
     if (!workspaceEntry || !workspaceEntry->pWorkspace || workspaceEntry->overviewBox.empty()) {
-        Hyprview::telemetryLogLazy([&] { return std::format("frame={} event=workspace-skip reason=invalid-workspace-image", g_currentTelemetryFrame); });
+        Hyprview::telemetryLogLazy([&] { return std::format("frame={} event=workspace-skip reason=invalid-workspace-entry", g_currentTelemetryFrame); });
         return;
     }
 
@@ -690,7 +690,7 @@ void CScrollOverview::renderWorkspaceLive(const SP<SWorkspaceEntry>& workspaceEn
     size_t                 skippedTiny      = 0;
     size_t                 skippedDuplicate = 0;
 
-    auto                   renderImage = [&](const SP<SWindowEntry>& entry) {
+    auto                   renderEntry = [&](const SP<SWindowEntry>& entry) {
         if (!entry)
             return;
 
@@ -749,12 +749,12 @@ void CScrollOverview::renderWorkspaceLive(const SP<SWorkspaceEntry>& workspaceEn
     if (const auto FULLSCREEN_ENTRY = renderedWindowEntryForWindow(FULLSCREEN_WINDOW);
         FULLSCREEN_ENTRY && FULLSCREEN_ENTRY->liveRenderable && FULLSCREEN_WINDOW->m_workspace == WORKSPACE) {
         if (const auto ENTRY = renderedWindowEntryForWindow(FULLSCREEN_WINDOW))
-            renderImage(ENTRY);
+            renderEntry(ENTRY);
 
         for (const auto& entry : workspaceEntry->windowEntries) {
             const auto WINDOW = windowForEntry(entry);
             if (WINDOW && WINDOW->m_isFloating && WINDOW != FULLSCREEN_WINDOW)
-                renderImage(entry);
+                renderEntry(entry);
         }
     } else {
         auto renderByState = [&](bool fullscreen, bool floating) {
@@ -763,7 +763,7 @@ void CScrollOverview::renderWorkspaceLive(const SP<SWorkspaceEntry>& workspaceEn
                 if (!WINDOW || WINDOW->isFullscreen() != fullscreen || WINDOW->m_isFloating != floating)
                     continue;
 
-                renderImage(entry);
+                renderEntry(entry);
             }
         };
 

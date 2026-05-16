@@ -288,8 +288,8 @@ bool CScrollOverview::shouldHandleSurfaceDamage(SP<CWLSurfaceResource> surface) 
         const auto ENTRY         = renderedWindowEntryForWindow(WINDOW);
         const auto LAYER_MONITOR = OWNER.layer ? OWNER.layer->m_monitor.lock() : PHLMONITOR{};
         Hyprview::telemetryLog(std::format(
-            "event=surface-damage-decision allow={} reason={} owner={} surface={:x} overviewMonitor={} ownerMonitor={} window={:x} windowWorkspace={} image={} imageBox={} "
-            "imageIntersects={} occluded={} layer={:x} layerNs={} layerLevel={} layerMapped={} layerValidMapped={}",
+            "event=surface-damage-decision allow={} reason={} owner={} surface={:x} overviewMonitor={} ownerMonitor={} window={:x} windowWorkspace={} entry={} entryBox={} "
+            "entryIntersects={} occluded={} layer={:x} layerNs={} layerLevel={} layerMapped={} layerValidMapped={}",
             allow ? 1 : 0, reason, ownerName(OWNER.type), reinterpret_cast<uintptr_t>(surface.get()), MONITOR ? MONITOR->m_name : "<none>",
             OWNER.monitor ? OWNER.monitor->m_name : "<none>", WINDOW ? reinterpret_cast<uintptr_t>(WINDOW.get()) : 0,
             WINDOW && WINDOW->m_workspace ? std::to_string(WINDOW->m_workspace->m_id) : "<none>", ENTRY ? 1 : 0, ENTRY ? Hyprview::formatBox(ENTRY->overviewBox) : "<none>",
@@ -381,8 +381,8 @@ bool CScrollOverview::shouldAllowSurfaceFrame(SP<CWLSurfaceResource> surface, co
         const auto WINDOW = overviewWindowToRender(OWNER.window);
         const auto ENTRY  = renderedWindowEntryForWindow(WINDOW);
         Hyprview::telemetryLog(std::format(
-            "event=surface-frame-decision allow={} reason={} owner={} surface={:x} overviewMonitor={} ownerMonitor={} window={:x} windowWorkspace={} image={} imageBox={} "
-            "imageIntersects={} overviewWindowVisible={} sendingOverviewFrameCallbacks={} layer={:x} layerNs={} layerLevel={} layerMapped={} layerValidMapped={}",
+            "event=surface-frame-decision allow={} reason={} owner={} surface={:x} overviewMonitor={} ownerMonitor={} window={:x} windowWorkspace={} entry={} entryBox={} "
+            "entryIntersects={} overviewWindowVisible={} sendingOverviewFrameCallbacks={} layer={:x} layerNs={} layerLevel={} layerMapped={} layerValidMapped={}",
             allow ? 1 : 0, reason, ownerName(OWNER.type), reinterpret_cast<uintptr_t>(surface.get()), MONITOR ? MONITOR->m_name : "<none>",
             OWNER.monitor ? OWNER.monitor->m_name : "<none>", WINDOW ? reinterpret_cast<uintptr_t>(WINDOW.get()) : 0,
             WINDOW && WINDOW->m_workspace ? std::to_string(WINDOW->m_workspace->m_id) : "<none>", ENTRY ? 1 : 0, ENTRY ? Hyprview::formatBox(ENTRY->overviewBox) : "<none>",

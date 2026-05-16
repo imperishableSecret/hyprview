@@ -238,11 +238,11 @@ double CScrollOverview::distanceToBox(const Vector2D& point, const CBox& box) {
     return dx * dx + dy * dy;
 }
 
-CBox CScrollOverview::expandedWindowHitBox(const SP<SWindowEntry>& image) const {
-    if (!image || !image->liveVisible || image->overviewBox.empty())
+CBox CScrollOverview::expandedWindowHitBox(const SP<SWindowEntry>& entry) const {
+    if (!entry || !entry->liveVisible || entry->overviewBox.empty())
         return {};
 
-    CBox box = image->overviewBox.intersection(workspaceRenderClipBox(workspaceEntryForWindowEntry(image)));
+    CBox box = entry->overviewBox.intersection(workspaceRenderClipBox(workspaceEntryForWindowEntry(entry)));
     box.noNegativeSize();
     if (box.empty())
         return {};
