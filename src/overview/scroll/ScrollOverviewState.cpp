@@ -30,6 +30,8 @@ void CScrollOverview::refreshWorkspaceEntries(PHLWORKSPACE preferredViewport, bo
     if (!pMonitor)
         return;
 
+    invalidateOverviewWindowIndex();
+
     const auto FALLBACK_VIEWPORT = !preferredViewport && viewportCurrentWorkspace < workspaceEntries.size() && workspaceEntries[viewportCurrentWorkspace] ?
         workspaceEntries[viewportCurrentWorkspace]->pWorkspace :
         PHLWORKSPACE{};

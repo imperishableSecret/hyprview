@@ -808,7 +808,7 @@ void CScrollOverview::renderPinnedFloatingWindowsLive(const Time::steady_tp& now
     std::vector<PHLWINDOW> renderedWindows;
     const auto             DRAGGED_WINDOW = overviewWindowToRender((inputState.windowDrag ? inputState.windowDrag->window.lock() : PHLWINDOW{}));
 
-    for (const auto& candidate : g_pCompositor->m_windows) {
+    for (const auto& candidate : pinnedFloatingOverviewWindows()) {
         const auto WINDOW = overviewWindowToRender(candidate);
         if (!windowLiveRenderable(WINDOW) || !WINDOW->m_pinned || !WINDOW->m_isFloating || WINDOW->m_monitor != MONITOR || WINDOW == DRAGGED_WINDOW)
             continue;

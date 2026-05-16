@@ -198,7 +198,7 @@ bool CScrollOverview::hasVisibleRealtimePreviewCallbacks() const {
         }
     }
 
-    for (const auto& window : g_pCompositor->m_windows) {
+    for (const auto& window : pinnedFloatingOverviewWindows()) {
         const auto WINDOW = overviewWindowToRender(window);
         if (!WINDOW || !WINDOW->m_pinned || !WINDOW->m_isFloating)
             continue;
@@ -473,7 +473,7 @@ bool CScrollOverview::shouldSuppressRenderDamage() const {
     if (geometryCacheNeedsRebuild())
         return false;
 
-    for (const auto& window : g_pCompositor->m_windows) {
+    for (const auto& window : overviewWindows()) {
         const auto WINDOW = overviewWindowToRender(window);
         if (!windowLiveRenderable(WINDOW) || WINDOW->m_monitor != MONITOR || !overviewWindowVisible(WINDOW))
             continue;
@@ -585,7 +585,7 @@ void CScrollOverview::sendOverviewFrameCallbacks(const Time::steady_tp& now) {
         }
     }
 
-    for (const auto& window : g_pCompositor->m_windows) {
+    for (const auto& window : pinnedFloatingOverviewWindows()) {
         const auto WINDOW = overviewWindowToRender(window);
         if (!WINDOW || !WINDOW->m_pinned || !WINDOW->m_isFloating || WINDOW->m_monitor != MONITOR)
             continue;

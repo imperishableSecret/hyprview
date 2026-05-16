@@ -184,12 +184,7 @@ bool CScrollOverview::workspaceHasDisplayableWindows(PHLWORKSPACE workspace) con
     if (!workspace)
         return false;
 
-    for (const auto& w : g_pCompositor->m_windows) {
-        if (windowBelongsToWorkspaceInOverview(w, workspace))
-            return true;
-    }
-
-    return false;
+    return !overviewWindowsForWorkspace(workspace, false).empty() || !overviewWindowsForWorkspace(workspace, true).empty();
 }
 
 bool CScrollOverview::workspaceVisibleInOverview(PHLWORKSPACE workspace) const {
@@ -206,16 +201,8 @@ bool CScrollOverview::windowBelongsToWorkspaceInOverview(PHLWINDOW window, PHLWO
     if (!window || !workspace || workspace->m_isSpecialWorkspace)
         return false;
 
-    if (!validMapped(window) && !window->m_fadingOut)
-        return false;
-
-    if (window->m_pinned)
-        return pMonitor && window->m_monitor == pMonitor && workspace == pMonitor->m_activeWorkspace;
-
-    if (window->m_fadingOut && !window->m_workspace)
-        return window->m_monitor == pMonitor && window->workspaceID() == workspace->m_id;
-
-    return window->m_workspace == workspace;
+    const auto WORKSPACE_ID = overviewWorkspaceIDForWindow(window);
+    return WORKSPACE_ID && *WORKSPACE_ID == workspace->m_id;
 }
 
 bool CScrollOverview::windowCanDragAcrossWorkspaces(PHLWINDOW window) const {

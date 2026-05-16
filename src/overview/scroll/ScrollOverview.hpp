@@ -119,7 +119,9 @@ class CScrollOverview : public IOverview {
         bool         hidden = false;
     };
 
-    using SLayerList = std::vector<PHLLS>;
+    using SLayerList           = std::vector<PHLLS>;
+    using SWindowList          = std::vector<PHLWINDOW>;
+    using SOptionalWorkspaceID = std::optional<WORKSPACEID>;
 
     struct SDropTarget {
         eDropTargetType     type = eDropTargetType::NONE;
@@ -253,6 +255,14 @@ class CScrollOverview : public IOverview {
     SP<SWindowEntry>         renderedWindowEntryForWindow(PHLWINDOW window) const;
     bool                     windowEntryRenderable(const SP<SWindowEntry>& image) const;
     bool                     windowEntryVisible(const SP<SWindowEntry>& image, const SP<SWorkspaceEntry>& workspace = nullptr) const;
+
+    void                     invalidateOverviewWindowIndex() const;
+    SOptionalWorkspaceID     overviewWorkspaceIDForWindow(PHLWINDOW window) const;
+    void                     rebuildOverviewWindowIndex() const;
+    const SWindowList&       overviewWindows() const;
+    const SWindowList&       pinnedFloatingOverviewWindows() const;
+    const SWindowList&       overviewWindowsForWorkspace(PHLWORKSPACE workspace, bool floating) const;
+
     double                   overviewStyleProgress() const;
     bool                     surfaceTreeHasFrameCallbacks(SP<CWLSurfaceResource> surface) const;
     bool                     hasVisibleRealtimePreviewCallbacks() const;
@@ -334,6 +344,16 @@ class CScrollOverview : public IOverview {
     using SSurfaceFrameCallbackCache = std::unordered_map<const void*, bool>;
     using SLayerLevelCache           = std::array<SLayerList, LAYER_LEVEL_COUNT>;
 
+    struct SOverviewWindowIndex {
+        const void*                                  monitor           = nullptr;
+        WORKSPACEID                                  activeWorkspaceID = WORKSPACE_INVALID;
+        size_t                                       compositorWindows = 0;
+        SWindowList                                  windows;
+        SWindowList                                  pinnedFloatingWindows;
+        std::unordered_map<WORKSPACEID, SWindowList> tiledWindowsByWorkspace;
+        std::unordered_map<WORKSPACEID, SWindowList> floatingWindowsByWorkspace;
+    };
+
     struct SInputState {
         ePointerMode                    mode = ePointerMode::IDLE;
         Vector2D                        pressPosLocal;
@@ -367,6 +387,8 @@ class CScrollOverview : public IOverview {
     mutable SSurfaceFrameCallbackCache                           surfaceFrameCallbackCache;
     mutable SLayerLevelCache                                     visibleLayerLevelCache;
     mutable std::array<bool, LAYER_LEVEL_COUNT>                  visibleLayerLevelCacheValid = {};
+    mutable SOverviewWindowIndex                                 overviewWindowIndex;
+    mutable bool                                                 overviewWindowIndexDirty = true;
 
     std::vector<SForcedSurfaceVisibility>                        forcedSurfaceVisibility;
     std::vector<SForcedWindowVisibility>                         forcedWindowVisibility;

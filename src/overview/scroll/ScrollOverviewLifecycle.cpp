@@ -178,6 +178,7 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
         if (closing)
             return;
 
+        invalidateOverviewWindowIndex();
         queueRefreshWorkspaceEntries(window && window->m_workspace ? window->m_workspace : (pMonitor ? pMonitor->m_activeWorkspace : nullptr), warpViewport);
     };
 
@@ -186,6 +187,7 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
         if (closing)
             return;
 
+        invalidateOverviewWindowIndex();
         if (window && renderedWindowEntryForWindow(window)) {
             resetSurfacePolicyCache();
             markGeometryCacheDirty(GEOMETRY_DIRTY_WINDOW_GEOMETRY);
@@ -202,6 +204,7 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
         if (closing || !pMonitor || !workspace)
             return;
 
+        invalidateOverviewWindowIndex();
         if (workspace->m_monitor == pMonitor || (window && window->m_monitor == pMonitor))
             queueRefreshWorkspaceEntries(workspace, false);
     };
@@ -243,6 +246,7 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
         if (closing || !pMonitor || !workspace || workspace->m_isSpecialWorkspace || workspace->m_monitor != pMonitor)
             return;
 
+        invalidateOverviewWindowIndex();
         queueRefreshWorkspaceEntries(workspace, false);
     };
 
