@@ -763,7 +763,7 @@ void CScrollOverview::renderOverviewLive(const Time::steady_tp& now) {
             if (needsPrune) {
                 std::erase_if(workspaceEntry->windowEntries, [](const auto& entry) { return !entry || !entry->pWindow; });
                 invalidateWindowEntryLookups();
-                markGeometryCacheDirty();
+                markGeometryCacheDirty(GEOMETRY_DIRTY_WINDOW_ENTRIES | GEOMETRY_DIRTY_WINDOW_GEOMETRY);
             }
         }
 

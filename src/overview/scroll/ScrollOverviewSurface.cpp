@@ -206,6 +206,8 @@ bool CScrollOverview::shouldHandleSurfaceDamage(SP<CWLSurfaceResource> surface) 
     if (!MONITOR || closing || !surface)
         return true;
 
+    ensureGeometryCache();
+
     const auto OWNER = overviewSurfaceOwner(surface);
     if (OWNER.type == eOverviewSurfaceOwner::UNKNOWN)
         return true;
@@ -292,6 +294,8 @@ bool CScrollOverview::shouldAllowSurfaceFrame(SP<CWLSurfaceResource> surface, co
     if (!MONITOR || closing || !surface)
         return true;
 
+    ensureGeometryCache();
+
     const auto OWNER = overviewSurfaceOwner(surface);
     if (OWNER.type == eOverviewSurfaceOwner::UNKNOWN)
         return true;
@@ -375,6 +379,8 @@ bool CScrollOverview::shouldAllowRealtimePreviewSchedule() {
     if (scale->isBeingAnimated() || viewOffset->isBeingAnimated())
         return true;
 
+    ensureGeometryCache();
+
     if (!hasVisibleRealtimePreviewCallbacks()) {
         realtimePreviewFrameQueued = false;
         return false;
@@ -400,6 +406,9 @@ bool CScrollOverview::shouldSuppressRenderDamage() const {
         return false;
 
     if (scale->isBeingAnimated() || viewOffset->isBeingAnimated())
+        return false;
+
+    if (geometryCacheNeedsRebuild())
         return false;
 
     for (const auto& window : g_pCompositor->m_windows) {

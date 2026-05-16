@@ -84,6 +84,16 @@ class CScrollOverview : public IOverview {
         LAYER_POPUP,
     };
 
+    static constexpr uint32_t GEOMETRY_DIRTY_NONE              = 0;
+    static constexpr uint32_t GEOMETRY_DIRTY_VIEWPORT          = 1 << 0;
+    static constexpr uint32_t GEOMETRY_DIRTY_WORKSPACE_LIST    = 1 << 1;
+    static constexpr uint32_t GEOMETRY_DIRTY_WINDOW_ENTRIES    = 1 << 2;
+    static constexpr uint32_t GEOMETRY_DIRTY_WINDOW_GEOMETRY   = 1 << 3;
+    static constexpr uint32_t GEOMETRY_DIRTY_WORKSPACE_PAN     = 1 << 4;
+    static constexpr uint32_t GEOMETRY_DIRTY_INSERTION_MARKERS = 1 << 5;
+    static constexpr uint32_t GEOMETRY_DIRTY_ALL = GEOMETRY_DIRTY_VIEWPORT | GEOMETRY_DIRTY_WORKSPACE_LIST | GEOMETRY_DIRTY_WINDOW_ENTRIES | GEOMETRY_DIRTY_WINDOW_GEOMETRY |
+        GEOMETRY_DIRTY_WORKSPACE_PAN | GEOMETRY_DIRTY_INSERTION_MARKERS;
+
     struct SOverviewSurfaceOwner {
         eOverviewSurfaceOwner type = eOverviewSurfaceOwner::UNKNOWN;
         PHLWINDOW             window;
@@ -164,7 +174,7 @@ class CScrollOverview : public IOverview {
     Vector2D                 clampedViewOffset(Vector2D offset) const;
     void                     rebuildGeometryCache();
     void                     ensureGeometryCache();
-    void                     markGeometryCacheDirty();
+    void                     markGeometryCacheDirty(uint32_t flags = GEOMETRY_DIRTY_ALL);
     bool                     geometryCacheNeedsRebuild() const;
     bool                     workspaceUsesScrollingLayout(PHLWORKSPACE workspace) const;
     SWorkspacePanRange       horizontalPanRangeForWorkspace(const SP<SWorkspaceEntry>& workspace) const;
@@ -342,7 +352,7 @@ class CScrollOverview : public IOverview {
     bool                                                         realtimePreviewFrameQueued    = false;
     bool                                                         sendingOverviewFrameCallbacks = false;
     mutable bool                                                 windowEntryLookupsDirty       = true;
-    bool                                                         geometryCacheDirty            = true;
+    uint32_t                                                     geometryDirtyFlags            = GEOMETRY_DIRTY_ALL;
     SGeometryCacheSnapshot                                       geometryCacheSnapshot;
 
     PHLWINDOWREF                                                 closeOnWindow;

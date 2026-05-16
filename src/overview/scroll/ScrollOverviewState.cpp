@@ -41,7 +41,7 @@ void CScrollOverview::refreshWorkspaceEntries(PHLWORKSPACE preferredViewport, bo
     });
 
     invalidateWindowEntryLookups();
-    markGeometryCacheDirty();
+    markGeometryCacheDirty(GEOMETRY_DIRTY_WORKSPACE_LIST | GEOMETRY_DIRTY_WINDOW_ENTRIES | GEOMETRY_DIRTY_INSERTION_MARKERS);
     workspaceEntries.clear();
 
     for (const auto& w : g_pCompositor->getWorkspaces()) {

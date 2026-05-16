@@ -307,6 +307,7 @@ void CScrollOverview::close(bool switchToSelection) {
     *viewOffset = Vector2D{};
 
     *scale = 1.F;
+    markGeometryCacheDirty(GEOMETRY_DIRTY_VIEWPORT | GEOMETRY_DIRTY_INSERTION_MARKERS);
 
     scale->setCallbackOnEnd(removeOverview);
 }
@@ -382,6 +383,7 @@ void CScrollOverview::resetSwipe() {
 
     (*scale)    = scrollingDefaultZoom();
     m_isSwiping = false;
+    markGeometryCacheDirty(GEOMETRY_DIRTY_VIEWPORT | GEOMETRY_DIRTY_INSERTION_MARKERS);
 }
 
 void CScrollOverview::onSwipeUpdate(double delta) {
@@ -391,6 +393,7 @@ void CScrollOverview::onSwipeUpdate(double delta) {
     const float PERC     = closing ? std::clamp(delta / sc<double>(DISTANCE), 0.0, 1.0) : 1.0 - std::clamp(delta / sc<double>(DISTANCE), 0.0, 1.0);
 
     scale->setValueAndWarp(hyprlerp(1.F, scrollingDefaultZoom(), PERC));
+    markGeometryCacheDirty(GEOMETRY_DIRTY_VIEWPORT | GEOMETRY_DIRTY_INSERTION_MARKERS);
 }
 
 void CScrollOverview::onSwipeEnd() {
@@ -401,4 +404,5 @@ void CScrollOverview::onSwipeEnd() {
 
     (*scale)    = scrollingDefaultZoom();
     m_isSwiping = false;
+    markGeometryCacheDirty(GEOMETRY_DIRTY_VIEWPORT | GEOMETRY_DIRTY_INSERTION_MARKERS);
 }

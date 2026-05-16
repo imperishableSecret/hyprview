@@ -17,7 +17,7 @@ void CScrollOverview::rebuildWorkspaceEntries(PHLWORKSPACE workspace) {
         onWorkspaceChange();
 
     invalidateWindowEntryLookups();
-    markGeometryCacheDirty();
+    markGeometryCacheDirty(GEOMETRY_DIRTY_WINDOW_ENTRIES | GEOMETRY_DIRTY_WINDOW_GEOMETRY);
 
     auto overview = workspaceEntryForWorkspace(workspace);
     if (!overview)

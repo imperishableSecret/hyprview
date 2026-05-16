@@ -331,6 +331,7 @@ void CScrollOverview::handlePointerAxis(IPointer::SAxisEvent event) {
         const auto VAL            = std::clamp(sc<float>(scale->value() + event.delta / -500.F), 0.05F, 0.95F);
         *scale                    = VAL;
         wheelWorkspaceScrollAccum = 0.0;
+        markGeometryCacheDirty(GEOMETRY_DIRTY_VIEWPORT | GEOMETRY_DIRTY_INSERTION_MARKERS);
     } else if (event.source == WL_POINTER_AXIS_SOURCE_WHEEL || event.mouse || event.deltaDiscrete != 0) {
         wheelWorkspaceScrollAccum = 0.0;
         moveViewportWorkspace(event.delta > 0);

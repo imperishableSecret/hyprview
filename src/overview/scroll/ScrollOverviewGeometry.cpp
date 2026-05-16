@@ -43,22 +43,22 @@ namespace {
 
 void CScrollOverview::rebuildGeometryCache() {
     if (!pMonitor) {
-        markGeometryCacheDirty();
+        markGeometryCacheDirty(GEOMETRY_DIRTY_ALL);
         return;
     }
 
     const auto MONITOR = pMonitor.lock();
     if (!MONITOR) {
-        markGeometryCacheDirty();
+        markGeometryCacheDirty(GEOMETRY_DIRTY_ALL);
         return;
     }
 
-    invalidateWindowEntryLookups();
-
-    const auto VIEWPORT_CENTER = CBox{{}, MONITOR->m_size}.middle();
-    const auto WINDOW_GAP      = (std::max(0.0, static_cast<double>(g_hyprviewConfig.scrolling.windowGap)) / 2.0) * overviewStyleProgress();
-    const auto WORKSPACE_STEP  = workspaceOverviewStep() * scale->value();
-    float      yoff            = -sc<float>(activeWorkspaceEntryIndex()) * WORKSPACE_STEP;
+    const auto DIRTY_FLAGS            = geometryDirtyFlags;
+    bool       renderedWindowRemapped = false;
+    const auto VIEWPORT_CENTER        = CBox{{}, MONITOR->m_size}.middle();
+    const auto WINDOW_GAP             = (std::max(0.0, static_cast<double>(g_hyprviewConfig.scrolling.windowGap)) / 2.0) * overviewStyleProgress();
+    const auto WORKSPACE_STEP         = workspaceOverviewStep() * scale->value();
+    float      yoff                   = -sc<float>(activeWorkspaceEntryIndex()) * WORKSPACE_STEP;
 
     for (const auto& workspaceEntry : workspaceEntries) {
         if (!workspaceEntry)
@@ -78,6 +78,9 @@ void CScrollOverview::rebuildGeometryCache() {
             const auto WINDOW = windowForEntry(entry);
             if (!WINDOW)
                 continue;
+
+            if (entry->lastRenderedWindow != nullptr && entry->lastRenderedWindow != WINDOW.get())
+                renderedWindowRemapped = true;
 
             const auto WINDOW_PAN = WINDOW->m_isFloating ? 0.0 : CONTENT_PAN_X;
             const CBox BASE_BOX   = {WINDOW->m_realPosition->value() - MONITOR->m_position, WINDOW->m_realSize->value()};
@@ -103,7 +106,10 @@ void CScrollOverview::rebuildGeometryCache() {
         yoff += WORKSPACE_STEP;
     }
 
-    buildInsertionMarkers();
+    if (DIRTY_FLAGS == GEOMETRY_DIRTY_NONE || (DIRTY_FLAGS & (GEOMETRY_DIRTY_VIEWPORT | GEOMETRY_DIRTY_WORKSPACE_LIST | GEOMETRY_DIRTY_INSERTION_MARKERS)))
+        buildInsertionMarkers();
+    if (renderedWindowRemapped)
+        invalidateWindowEntryLookups();
 
     geometryCacheSnapshot = {
         .monitor              = MONITOR.get(),
@@ -114,7 +120,7 @@ void CScrollOverview::rebuildGeometryCache() {
         .activeWorkspaceIndex = activeWorkspaceEntryIndex(),
         .workspaceCount       = workspaceEntries.size(),
     };
-    geometryCacheDirty = false;
+    geometryDirtyFlags = GEOMETRY_DIRTY_NONE;
 }
 
 void CScrollOverview::ensureGeometryCache() {
@@ -122,12 +128,12 @@ void CScrollOverview::ensureGeometryCache() {
         rebuildGeometryCache();
 }
 
-void CScrollOverview::markGeometryCacheDirty() {
-    geometryCacheDirty = true;
+void CScrollOverview::markGeometryCacheDirty(uint32_t flags) {
+    geometryDirtyFlags |= flags;
 }
 
 bool CScrollOverview::geometryCacheNeedsRebuild() const {
-    if (geometryCacheDirty)
+    if (geometryDirtyFlags != GEOMETRY_DIRTY_NONE)
         return true;
 
     const auto MONITOR = pMonitor.lock();
