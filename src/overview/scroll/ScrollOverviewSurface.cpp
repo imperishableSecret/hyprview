@@ -160,6 +160,10 @@ bool CScrollOverview::hasVisibleRealtimePreviewCallbacks() const {
     return false;
 }
 
+PHLWINDOW CScrollOverview::closeTargetWindow() const {
+    return overviewWindowToRender(closeFrameWindow.lock());
+}
+
 void CScrollOverview::surfaceTreePresent(SP<CWLSurfaceResource> surface, PHLMONITOR monitor, const Time::steady_tp& now) {
     if (!surface || !monitor)
         return;
@@ -174,6 +178,27 @@ void CScrollOverview::surfaceTreePresent(SP<CWLSurfaceResource> surface, PHLMONI
             child->presentFeedback(NOW, MONITOR, false);
         },
         &data);
+}
+
+bool CScrollOverview::sendCloseTargetFrameCallback(const Time::steady_tp& now) {
+    const auto MONITOR = pMonitor.lock();
+    const auto WINDOW  = closeTargetWindow();
+    if (!MONITOR || !windowLiveRenderable(WINDOW) || WINDOW->m_monitor != MONITOR)
+        return false;
+
+    const auto SURFACE = WINDOW->wlSurface() ? WINDOW->wlSurface()->resource() : nullptr;
+    if (!surfaceTreeHasFrameCallbacks(SURFACE))
+        return false;
+
+    const bool PREVIOUS_SENDING   = sendingOverviewFrameCallbacks;
+    sendingOverviewFrameCallbacks = true;
+
+    surfaceTreePresent(SURFACE, MONITOR, now);
+
+    sendingOverviewFrameCallbacks = PREVIOUS_SENDING;
+    lastRealtimePreviewFrame      = now;
+    realtimePreviewFrameQueued    = false;
+    return true;
 }
 
 bool CScrollOverview::shouldHandleSurfaceDamage(SP<CWLSurfaceResource> surface) {
@@ -441,8 +466,13 @@ int CScrollOverview::realtimePreviewTimerCallback(void* data) {
 
 void CScrollOverview::sendOverviewFrameCallbacks(const Time::steady_tp& now) {
     const auto MONITOR = pMonitor.lock();
-    if (!MONITOR || closing)
+    if (!MONITOR)
         return;
+
+    if (closing) {
+        sendCloseTargetFrameCallback(now);
+        return;
+    }
 
     bool       sentWindowFrame    = false;
     const bool CAN_FRAME_WINDOW   = shouldAllowRealtimePreviewFrame();

@@ -34,6 +34,8 @@ class CScrollOverview : public IOverview {
     virtual bool shouldAllowSurfaceFrame(SP<CWLSurfaceResource> surface, const Time::steady_tp& now);
     virtual bool shouldAllowRealtimePreviewSchedule();
     virtual bool shouldSuppressRenderDamage() const;
+    virtual bool shouldRenderNativeWorkspace() const;
+    virtual void finishNativeWorkspaceHandoff();
     virtual void onPreRender();
 
     virtual void setClosing(bool closing);
@@ -222,6 +224,8 @@ class CScrollOverview : public IOverview {
     double                   overviewStyleProgress() const;
     bool                     surfaceTreeHasFrameCallbacks(SP<CWLSurfaceResource> surface) const;
     bool                     hasVisibleRealtimePreviewCallbacks() const;
+    PHLWINDOW                closeTargetWindow() const;
+    bool                     sendCloseTargetFrameCallback(const Time::steady_tp& now);
     void                     surfaceTreePresent(SP<CWLSurfaceResource> surface, PHLMONITOR monitor, const Time::steady_tp& now);
     void                     sendOverviewFrameCallbacks(const Time::steady_tp& now);
     bool                     shouldAllowRealtimePreviewFrame() const;
@@ -316,6 +320,7 @@ class CScrollOverview : public IOverview {
     mutable bool                                                 windowEntryLookupsDirty       = true;
 
     PHLWINDOWREF                                                 closeOnWindow;
+    PHLWINDOWREF                                                 closeFrameWindow;
     PHLWORKSPACEREF                                              closeOnWorkspace;
     PHLWINDOWREF                                                 keyboardSelectedWindow;
     PHLWINDOWREF                                                 hoveredWindow;

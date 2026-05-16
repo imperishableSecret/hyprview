@@ -31,6 +31,10 @@ class IOverview {
     virtual bool shouldSuppressRenderDamage() const {
         return false;
     }
+    virtual bool shouldRenderNativeWorkspace() const {
+        return false;
+    }
+    virtual void      finishNativeWorkspaceHandoff() {}
     virtual void      onPreRender() = 0;
 
     virtual void      setClosing(bool closing) = 0;

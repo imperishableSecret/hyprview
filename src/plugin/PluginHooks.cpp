@@ -141,6 +141,13 @@ namespace {
     }
 
     void hkRenderWorkspace(void* thisptr, PHLMONITOR pMonitor, PHLWORKSPACE pWorkspace, const Time::steady_tp& now, const CBox& geometry) {
+        if (g_pOverview && g_pOverview->pMonitor == pMonitor && g_pOverview->shouldRenderNativeWorkspace()) {
+            const auto OVERVIEW = g_pOverview;
+            OVERVIEW->finishNativeWorkspaceHandoff();
+            ((origRenderWorkspace)(g_pRenderWorkspaceHook->m_original))(thisptr, pMonitor, pWorkspace, now, geometry);
+            return;
+        }
+
         if (!g_pOverview || renderingOverview || Hyprview::isOverviewRendering() || g_pOverview->blockOverviewRendering || g_pOverview->pMonitor != pMonitor)
             ((origRenderWorkspace)(g_pRenderWorkspaceHook->m_original))(thisptr, pMonitor, pWorkspace, now, geometry);
         else {

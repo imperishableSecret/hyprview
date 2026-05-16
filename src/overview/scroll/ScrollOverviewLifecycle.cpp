@@ -38,7 +38,7 @@ static void damageMonitor(WP<Hyprutils::Animation::CBaseAnimatedVariable> thispt
     g_pOverview->damage();
 }
 
-static void removeOverview(WP<Hyprutils::Animation::CBaseAnimatedVariable> thisptr) {
+static void removeOverviewNow() {
     const auto OVERVIEW = g_pOverview;
     const auto MONITOR  = OVERVIEW && OVERVIEW->pMonitor ? OVERVIEW->pMonitor.lock() : PHLMONITOR{};
 
@@ -49,6 +49,10 @@ static void removeOverview(WP<Hyprutils::Animation::CBaseAnimatedVariable> thisp
         g_pHyprRenderer->damageMonitor(MONITOR);
         g_pCompositor->scheduleFrameForMonitor(MONITOR);
     }
+}
+
+static void removeOverview(WP<Hyprutils::Animation::CBaseAnimatedVariable> thisptr) {
+    removeOverviewNow();
 }
 
 static float hyprlerp(const float& from, const float& to, const float perc) {
@@ -280,6 +284,7 @@ void CScrollOverview::close(bool switchToSelection) {
                                                       (FOCUSED_WINDOW && FOCUSED_WINDOW->m_workspace ? FOCUSED_WINDOW->m_workspace : pMonitor->m_activeWorkspace);
     const bool TARGET_IS_ACTIVE = (!TARGET_WINDOW || TARGET_WINDOW == FOCUSED_WINDOW) && TARGET_WORKSPACE == pMonitor->m_activeWorkspace;
     const auto FINAL_WORKSPACE  = TARGET_WORKSPACE ? TARGET_WORKSPACE : pMonitor->m_activeWorkspace;
+    closeFrameWindow            = TARGET_WINDOW;
 
     if (switchToSelection && !TARGET_IS_ACTIVE) {
         if (TARGET_WORKSPACE && TARGET_WORKSPACE != pMonitor->m_activeWorkspace)
@@ -346,6 +351,23 @@ void CScrollOverview::render() {
         highlightHoverDebug(false);
 
     renderOverviewLive(Time::steadyNow());
+}
+
+bool CScrollOverview::shouldRenderNativeWorkspace() const {
+    if (!closing || !scale || !viewOffset)
+        return false;
+
+    static constexpr float  SCALE_EPSILON  = 0.002F;
+    static constexpr double OFFSET_EPSILON = 0.5;
+
+    return std::abs(scale->value() - 1.F) <= SCALE_EPSILON && viewOffset->value().distance({}) <= OFFSET_EPSILON;
+}
+
+void CScrollOverview::finishNativeWorkspaceHandoff() {
+    if (!closing)
+        return;
+
+    removeOverviewNow();
 }
 
 void CScrollOverview::setClosing(bool closing_) {
