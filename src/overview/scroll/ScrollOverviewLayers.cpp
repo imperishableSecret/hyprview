@@ -115,7 +115,7 @@ void CScrollOverview::renderWorkspaceLayer(PHLLS layer, const SP<SWorkspaceEntry
         return;
 
     const auto OVERVIEW_BOX = workspaceEntry->overviewBox;
-    if (!overviewBoxIntersectsMonitor(OVERVIEW_BOX))
+    if (!workspaceIntersectsViewport(workspaceEntry))
         return;
 
     const double LAYER_SCALE = std::min(OVERVIEW_BOX.w / std::max(MONITOR->m_size.x, 1.0), OVERVIEW_BOX.h / std::max(MONITOR->m_size.y, 1.0));
@@ -141,6 +141,10 @@ void CScrollOverview::renderWorkspaceLayer(PHLLS layer, const SP<SWorkspaceEntry
 void CScrollOverview::renderWorkspaceLayerLevel(const SP<SWorkspaceEntry>& workspaceEntry, uint32_t layer, const Time::steady_tp& now) {
     const auto MONITOR = pMonitor.lock();
     if (!MONITOR || layer >= MONITOR->m_layerSurfaceLayers.size())
+        return;
+
+    const CBox WORKSPACE_CLIP = workspaceRenderClipBox(workspaceEntry);
+    if (WORKSPACE_CLIP.empty())
         return;
 
     for (const auto& layerRef : MONITOR->m_layerSurfaceLayers[layer]) {

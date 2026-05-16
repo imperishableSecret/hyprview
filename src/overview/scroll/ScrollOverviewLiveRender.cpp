@@ -214,18 +214,83 @@ bool CScrollOverview::windowEntryRenderable(const SP<SWindowEntry>& image) const
     return windowLiveRenderable(windowForEntry(image));
 }
 
-bool CScrollOverview::windowEntryVisible(const SP<SWindowEntry>& image) const {
-    const auto WINDOW = windowForEntry(image);
-    return image && WINDOW && image->liveRenderable && !image->overviewBox.empty() && overviewBoxIntersectsMonitor(image->overviewBox) &&
-        !overviewWindowOccludedByFullscreen(WINDOW);
+bool CScrollOverview::windowEntryVisible(const SP<SWindowEntry>& image, const SP<SWorkspaceEntry>& workspace) const {
+    if (!image)
+        return false;
+
+    const auto WINDOW     = windowForEntry(image);
+    const bool INTERSECTS = workspace ? windowEntryIntersectsWorkspaceViewport(image, workspace) : overviewBoxIntersectsMonitor(image->overviewBox);
+    return image && WINDOW && image->liveRenderable && !image->overviewBox.empty() && INTERSECTS && !overviewWindowOccludedByFullscreen(WINDOW);
+}
+
+CBox CScrollOverview::overviewViewportBox() const {
+    if (!pMonitor)
+        return {};
+
+    return CBox{{}, pMonitor->m_size};
+}
+
+CBox CScrollOverview::expandedOverviewViewportBox(double margin) const {
+    CBox viewport = overviewViewportBox();
+    if (viewport.empty())
+        return {};
+
+    viewport.expand(std::max(0.0, margin));
+    return viewport;
+}
+
+CBox CScrollOverview::workspaceRenderClipBox(const SP<SWorkspaceEntry>& workspace) const {
+    if (!workspace || !workspace->pWorkspace || workspace->overviewBox.empty())
+        return {};
+
+    CBox clip = workspace->overviewBox;
+    if (workspaceUsesScrollingLayout(workspace->pWorkspace)) {
+        const CBox VIEWPORT = overviewViewportBox();
+        clip.x              = VIEWPORT.x;
+        clip.w              = VIEWPORT.w;
+    }
+
+    clip = clip.intersection(overviewViewportBox());
+    clip.noNegativeSize();
+    return clip;
+}
+
+double CScrollOverview::overviewCullMargin() const {
+    const double STYLE_PROGRESS = overviewStyleProgress();
+    const double SHADOW         = std::max(0.0, sc<double>(g_hyprviewConfig.scrolling.workspaceShadowSize) * STYLE_PROGRESS);
+    const double BORDER         = std::max(0.0, sc<double>(g_hyprviewConfig.scrolling.activeBorderSize));
+    const double WINDOW_GAP     = std::max(0.0, sc<double>(g_hyprviewConfig.scrolling.windowGap) * STYLE_PROGRESS);
+
+    return std::max(4.0, SHADOW + BORDER + WINDOW_GAP + 2.0);
+}
+
+bool CScrollOverview::overviewBoxIntersectsViewport(const CBox& box, double margin) const {
+    if (box.w <= 0.0 || box.h <= 0.0)
+        return false;
+
+    const CBox viewport = expandedOverviewViewportBox(margin);
+    return !viewport.empty() && box.overlaps(viewport);
 }
 
 bool CScrollOverview::overviewBoxIntersectsMonitor(const CBox& box) const {
-    if (!pMonitor || box.w <= 0.0 || box.h <= 0.0)
+    return overviewBoxIntersectsViewport(box);
+}
+
+bool CScrollOverview::workspaceIntersectsViewport(const SP<SWorkspaceEntry>& workspace, double margin) const {
+    return workspace && workspace->pWorkspace && overviewBoxIntersectsViewport(workspace->overviewBox, margin);
+}
+
+bool CScrollOverview::windowEntryIntersectsWorkspaceViewport(const SP<SWindowEntry>& image, const SP<SWorkspaceEntry>& workspace, double margin) const {
+    if (!image || image->overviewBox.empty())
         return false;
 
-    const auto SIZE = pMonitor->m_size;
-    return box.x < SIZE.x && box.x + box.w > 0.0 && box.y < SIZE.y && box.y + box.h > 0.0;
+    CBox viewport = expandedOverviewViewportBox(margin);
+    if (viewport.empty())
+        return false;
+
+    CBox visibleArea = workspace ? workspaceRenderClipBox(workspace).intersection(viewport) : viewport;
+    visibleArea.noNegativeSize();
+    return !visibleArea.empty() && image->overviewBox.overlaps(visibleArea);
 }
 
 bool CScrollOverview::overviewWindowOccludedByFullscreen(PHLWINDOW window) const {
@@ -347,18 +412,22 @@ void CScrollOverview::restoreForcedWindowVisibility() {
     forcedWindowVisibility.clear();
 }
 
-bool CScrollOverview::renderWindowLive(PHLWINDOW window, const CBox& box, const Time::steady_tp& now, double alpha) {
-    const auto MONITOR    = pMonitor.lock();
-    window                = overviewWindowToRender(window);
-    const bool INTERSECTS = overviewBoxIntersectsMonitor(box);
+bool CScrollOverview::renderWindowLive(PHLWINDOW window, const CBox& box, const Time::steady_tp& now, double alpha, const CBox& clipBox) {
+    const auto MONITOR = pMonitor.lock();
+    window             = overviewWindowToRender(window);
+
+    CBox renderClip = clipBox.empty() ? CBox{} : clipBox.intersection(box);
+    renderClip.noNegativeSize();
+
+    const bool INTERSECTS = clipBox.empty() ? overviewBoxIntersectsMonitor(box) : !renderClip.empty();
     logWindowTelemetry("render-window-enter", window, box, INTERSECTS);
 
     if (!MONITOR || !window || box.empty() || !INTERSECTS) {
-        logWindowTelemetry("render-window-skip", window, box, INTERSECTS, "invalid-monitor-window-or-box");
+        logWindowTelemetry("render-window-skip", window, box, INTERSECTS, clipBox.empty() ? "invalid-monitor-window-or-box" : "invalid-window-box-or-clip");
         return false;
     }
 
-    if (overviewBoxTooSmallForLiveRender(box)) {
+    if (overviewBoxTooSmallForLiveRender(clipBox.empty() ? box : renderClip)) {
         logWindowTelemetry("render-window-skip", window, box, INTERSECTS, "tiny-window");
         return false;
     }
@@ -429,7 +498,7 @@ void CScrollOverview::renderWorkspaceLive(const SP<SWorkspaceEntry>& workspaceEn
 
     const auto MONITOR = pMonitor.lock();
 
-    const bool WORKSPACE_INTERSECTS = overviewBoxIntersectsMonitor(workspaceEntry->overviewBox);
+    const bool WORKSPACE_INTERSECTS = workspaceIntersectsViewport(workspaceEntry, overviewCullMargin());
     const bool TELEMETRY            = Hyprview::telemetryEnabled();
     const auto SELECTED_WINDOW      = TELEMETRY ? overviewWindowToRender(keyboardSelectedWindow.lock()) : PHLWINDOW{};
     const auto ACTIVE_WINDOW        = TELEMETRY ? overviewWindowToRender(Desktop::focusState()->window()) : PHLWINDOW{};
@@ -460,8 +529,8 @@ void CScrollOverview::renderWorkspaceLive(const SP<SWorkspaceEntry>& workspaceEn
 
     if (!WORKSPACE_INTERSECTS) {
         Hyprview::telemetryLogLazy([&] {
-            return std::format("frame={} event=workspace-skip reason=outside-monitor workspace={} overviewBox={}", g_currentTelemetryFrame, workspaceID(workspaceEntry->pWorkspace),
-                               Hyprview::formatBox(workspaceEntry->overviewBox));
+            return std::format("frame={} event=workspace-skip reason=outside-viewport workspace={} overviewBox={}", g_currentTelemetryFrame,
+                               workspaceID(workspaceEntry->pWorkspace), Hyprview::formatBox(workspaceEntry->overviewBox));
         });
         return;
     }
@@ -497,7 +566,7 @@ void CScrollOverview::renderWorkspaceLive(const SP<SWorkspaceEntry>& workspaceEn
 
         const auto WINDOW     = windowForEntry(entry);
         const bool RENDERABLE = entry->liveRenderable;
-        const bool INTERSECTS = entry ? overviewBoxIntersectsMonitor(entry->overviewBox) : false;
+        const bool INTERSECTS = windowEntryIntersectsWorkspaceViewport(entry, workspaceEntry, overviewCullMargin());
         if (TELEMETRY) {
             const CBox CURRENT_RAW = WINDOW && MONITOR && WINDOW->m_realPosition && WINDOW->m_realSize ?
                 CBox{WINDOW->m_realPosition->value() - MONITOR->m_position, WINDOW->m_realSize->value()} :
@@ -527,18 +596,22 @@ void CScrollOverview::renderWorkspaceLive(const SP<SWorkspaceEntry>& workspaceEn
 
         if (!INTERSECTS) {
             ++skippedCull;
-            logWindowTelemetry("window-candidate-skip", WINDOW, entry->overviewBox, INTERSECTS, "outside-monitor");
+            logWindowTelemetry("window-candidate-skip", WINDOW, entry->overviewBox, INTERSECTS, "outside-workspace-viewport");
             return;
         }
 
-        if (overviewBoxTooSmallForLiveRender(entry->overviewBox)) {
+        const CBox WINDOW_CLIP = workspaceRenderClipBox(workspaceEntry);
+        CBox       visibleBox  = entry->overviewBox.intersection(WINDOW_CLIP);
+        visibleBox.noNegativeSize();
+
+        if (overviewBoxTooSmallForLiveRender(visibleBox)) {
             ++skippedTiny;
             logWindowTelemetry("window-candidate-skip", WINDOW, entry->overviewBox, INTERSECTS, "tiny-window");
             return;
         }
 
         renderedWindows.emplace_back(WINDOW);
-        if (renderWindowLive(WINDOW, entry->overviewBox, now))
+        if (renderWindowLive(WINDOW, entry->overviewBox, now, 1.0, WINDOW_CLIP))
             ++submittedWindows;
     };
 
@@ -553,24 +626,22 @@ void CScrollOverview::renderWorkspaceLive(const SP<SWorkspaceEntry>& workspaceEn
             if (WINDOW && WINDOW->m_isFloating && WINDOW != FULLSCREEN_WINDOW)
                 renderImage(entry);
         }
+    } else {
+        auto renderByState = [&](bool fullscreen, bool floating) {
+            for (const auto& entry : workspaceEntry->windowEntries) {
+                const auto WINDOW = windowForEntry(entry);
+                if (!WINDOW || WINDOW->isFullscreen() != fullscreen || WINDOW->m_isFloating != floating)
+                    continue;
 
-        return;
+                renderImage(entry);
+            }
+        };
+
+        renderByState(false, false);
+        renderByState(false, true);
+        renderByState(true, false);
+        renderByState(true, true);
     }
-
-    auto renderByState = [&](bool fullscreen, bool floating) {
-        for (const auto& entry : workspaceEntry->windowEntries) {
-            const auto WINDOW = windowForEntry(entry);
-            if (!WINDOW || WINDOW->isFullscreen() != fullscreen || WINDOW->m_isFloating != floating)
-                continue;
-
-            renderImage(entry);
-        }
-    };
-
-    renderByState(false, false);
-    renderByState(false, true);
-    renderByState(true, false);
-    renderByState(true, true);
 
     Hyprview::telemetryLogLazy([&] {
         return std::format("frame={} event=workspace-render-summary workspace={} submitted={} skippedState={} skippedCull={} skippedTiny={} skippedDuplicate={}",
@@ -618,7 +689,11 @@ void CScrollOverview::renderPinnedFloatingWindowsLive(const Time::steady_tp& now
         renderedWindows.emplace_back(WINDOW);
 
         if (const auto ENTRY = renderedWindowEntryForWindow(WINDOW)) {
-            renderWindowLive(WINDOW, ENTRY->overviewBox, now);
+            const auto WORKSPACE_ENTRY = workspaceEntryForWindowEntry(ENTRY);
+            if (!windowEntryIntersectsWorkspaceViewport(ENTRY, WORKSPACE_ENTRY))
+                continue;
+
+            renderWindowLive(WINDOW, ENTRY->overviewBox, now, 1.0, workspaceRenderClipBox(WORKSPACE_ENTRY));
             continue;
         }
 
@@ -677,7 +752,8 @@ void CScrollOverview::renderOverviewLive(const Time::steady_tp& now) {
                 }
 
                 const auto WINDOW = windowForEntry(entry);
-                if (!entry->liveVisible || WINDOW == DRAGGED_WINDOW || (WINDOW && WINDOW->m_pinned && WINDOW->m_isFloating))
+                if (!entry->liveVisible || WINDOW == DRAGGED_WINDOW || (WINDOW && WINDOW->m_pinned && WINDOW->m_isFloating) ||
+                    !windowEntryIntersectsWorkspaceViewport(entry, workspaceEntry))
                     continue;
 
                 renderFocusIndicator(entry);

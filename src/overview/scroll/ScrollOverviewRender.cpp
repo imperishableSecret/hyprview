@@ -9,11 +9,24 @@
 #include <hyprland/src/desktop/Workspace.hpp>
 #include <hyprland/src/desktop/view/Window.hpp>
 #include <hyprland/src/helpers/time/Time.hpp>
+#include <hyprutils/utils/ScopeGuard.hpp>
 #undef protected
 #undef private
 #include <hyprland/src/config/shared/complex/ComplexDataTypes.hpp>
 
 using Render::GL::g_pHyprOpenGL;
+
+namespace {
+    CBox scaledOverviewClip(PHLMONITOR monitor, CBox logicalClip) {
+        if (!monitor || logicalClip.empty())
+            return {};
+
+        logicalClip.scale(monitor->m_scale).round();
+        logicalClip = logicalClip.intersection(CBox{{}, monitor->m_transformedSize});
+        logicalClip.noNegativeSize();
+        return logicalClip;
+    }
+}
 
 void CScrollOverview::clearCurrentRenderTarget(const CHyprColor& color) {
     g_pHyprRenderer->draw(CClearPassElement::SClearData{color});
@@ -110,6 +123,9 @@ void CScrollOverview::renderWorkspaceAnnotations() {
         if (!workspaceEntry || !workspaceEntry->pWorkspace || workspaceEntry->overviewBox.empty())
             continue;
 
+        if (!workspaceIntersectsViewport(workspaceEntry))
+            continue;
+
         const auto TEXT    = workspaceAnnotationText(workspaceEntry->pWorkspace);
         const auto TEXTURE = labelTexture(TEXT, g_hyprviewConfig.scrolling.workspaceAnnotationColor, FONT_SIZE);
         const auto SIZE    = labelTextureSize(TEXTURE);
@@ -127,6 +143,9 @@ void CScrollOverview::renderWorkspaceAnnotations() {
         if (bgBox.w > workspaceEntry->overviewBox.w || bgBox.h > workspaceEntry->overviewBox.h)
             continue;
 
+        if (!overviewBoxIntersectsViewport(bgBox))
+            continue;
+
         CBox scaledBg = bgBox;
         scaledBg.scale(pMonitor->m_scale).round();
         g_pHyprOpenGL->renderRect(scaledBg, CHyprColor{g_hyprviewConfig.scrolling.workspaceAnnotationBgColor}, Render::GL::CHyprOpenGLImpl::SRectRenderData{.round = 5});
@@ -141,6 +160,9 @@ void CScrollOverview::renderInsertionMarkers() {
 
     for (const auto& marker : insertionMarkers) {
         if (marker.box.empty())
+            continue;
+
+        if (!overviewBoxIntersectsViewport(marker.box))
             continue;
 
         const bool HOVERED = inputState.dropTarget.type == eDropTargetType::WORKSPACE_INSERTION && inputState.dropTarget.targetWorkspaceID == marker.workspaceID;
@@ -190,6 +212,15 @@ void CScrollOverview::renderFocusIndicator(SP<SWindowEntry> entry) {
     if (!entry || (!entry->highlight && !windowEntryIsSelected(entry)) || entry->overviewBox.empty() || !pMonitor)
         return;
 
+    const auto MONITOR = pMonitor.lock();
+    const auto CLIP    = scaledOverviewClip(MONITOR, workspaceRenderClipBox(workspaceEntryForWindowEntry(entry)));
+    if (CLIP.empty())
+        return;
+
+    const auto PREVIOUS_CLIP              = g_pHyprRenderer->m_renderData.clipBox;
+    g_pHyprRenderer->m_renderData.clipBox = CLIP;
+    auto restoreClip                      = Hyprutils::Utils::CScopeGuard([PREVIOUS_CLIP] { g_pHyprRenderer->m_renderData.clipBox = PREVIOUS_CLIP; });
+
     CBox texbox = entry->overviewBox;
     texbox.scale(pMonitor->m_scale).round();
 
@@ -210,6 +241,15 @@ void CScrollOverview::renderFocusIndicator(SP<SWindowEntry> entry) {
 void CScrollOverview::renderActiveWindowIndicator(SP<SWindowEntry> entry) {
     if (!windowEntryIsActive(entry) || entry->overviewBox.empty() || !pMonitor)
         return;
+
+    const auto MONITOR = pMonitor.lock();
+    const auto CLIP    = scaledOverviewClip(MONITOR, workspaceRenderClipBox(workspaceEntryForWindowEntry(entry)));
+    if (CLIP.empty())
+        return;
+
+    const auto PREVIOUS_CLIP              = g_pHyprRenderer->m_renderData.clipBox;
+    g_pHyprRenderer->m_renderData.clipBox = CLIP;
+    auto              restoreClip         = Hyprutils::Utils::CScopeGuard([PREVIOUS_CLIP] { g_pHyprRenderer->m_renderData.clipBox = PREVIOUS_CLIP; });
 
     const std::string MODE = g_hyprviewConfig.scrolling.activeIndicator;
     if (MODE == "none")
@@ -308,6 +348,10 @@ void CScrollOverview::renderWorkspaceShadows() {
         shadowBox.y -= SHADOW_SIZE;
         shadowBox.w += SHADOW_SIZE * 2.0;
         shadowBox.h += SHADOW_SIZE * 2.0;
+
+        if (!overviewBoxIntersectsViewport(shadowBox))
+            continue;
+
         shadowBox.scale(pMonitor->m_scale).round();
         g_pHyprOpenGL->renderRect(shadowBox, SHADOW_COLOR, Render::GL::CHyprOpenGLImpl::SRectRenderData{.round = 10});
     }

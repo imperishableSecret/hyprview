@@ -212,7 +212,14 @@ class CScrollOverview : public IOverview {
     SOverviewSurfaceOwner    overviewSurfaceOwner(SP<CWLSurfaceResource> surface) const;
     bool                     surfaceOwnerBelongsToOverviewMonitor(const SOverviewSurfaceOwner& owner, PHLMONITOR monitor) const;
     bool                     overviewWindowVisible(PHLWINDOW window) const;
+    CBox                     overviewViewportBox() const;
+    CBox                     expandedOverviewViewportBox(double margin = 0.0) const;
+    CBox                     workspaceRenderClipBox(const SP<SWorkspaceEntry>& workspace) const;
+    double                   overviewCullMargin() const;
     bool                     overviewBoxIntersectsMonitor(const CBox& box) const;
+    bool                     overviewBoxIntersectsViewport(const CBox& box, double margin = 0.0) const;
+    bool                     workspaceIntersectsViewport(const SP<SWorkspaceEntry>& workspace, double margin = 0.0) const;
+    bool                     windowEntryIntersectsWorkspaceViewport(const SP<SWindowEntry>& image, const SP<SWorkspaceEntry>& workspace, double margin = 0.0) const;
     bool                     overviewWindowOccludedByFullscreen(PHLWINDOW window) const;
     PHLWINDOW                overviewWindowToRender(PHLWINDOW window) const;
     PHLWINDOW                windowForEntry(const SP<SWindowEntry>& image) const;
@@ -220,7 +227,7 @@ class CScrollOverview : public IOverview {
     void                     invalidateWindowEntryLookups() const;
     SP<SWindowEntry>         renderedWindowEntryForWindow(PHLWINDOW window) const;
     bool                     windowEntryRenderable(const SP<SWindowEntry>& image) const;
-    bool                     windowEntryVisible(const SP<SWindowEntry>& image) const;
+    bool                     windowEntryVisible(const SP<SWindowEntry>& image, const SP<SWorkspaceEntry>& workspace = nullptr) const;
     double                   overviewStyleProgress() const;
     bool                     surfaceTreeHasFrameCallbacks(SP<CWLSurfaceResource> surface) const;
     bool                     hasVisibleRealtimePreviewCallbacks() const;
@@ -239,7 +246,7 @@ class CScrollOverview : public IOverview {
     void                     restoreForcedWindowVisibility();
     void                     renderOverviewLive(const Time::steady_tp& now);
     void                     renderWorkspaceLive(const SP<SWorkspaceEntry>& workspace, const Time::steady_tp& now);
-    bool                     renderWindowLive(PHLWINDOW window, const CBox& box, const Time::steady_tp& now, double alpha = 1.0);
+    bool                     renderWindowLive(PHLWINDOW window, const CBox& box, const Time::steady_tp& now, double alpha = 1.0, const CBox& clipBox = {});
     void                     renderDraggedWindowLive(const Time::steady_tp& now);
     void                     renderPinnedFloatingWindowsLive(const Time::steady_tp& now);
     void                     forceLayerSurfaceTreeVisibility(PHLLS layer, bool popups);

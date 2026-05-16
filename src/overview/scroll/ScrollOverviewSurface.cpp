@@ -107,7 +107,7 @@ bool CScrollOverview::overviewWindowVisible(PHLWINDOW window) const {
     if (!ENTRY || ENTRY->overviewBox.empty())
         return false;
 
-    return overviewBoxIntersectsMonitor(ENTRY->overviewBox) && !overviewWindowOccludedByFullscreen(window);
+    return windowEntryIntersectsWorkspaceViewport(ENTRY, workspaceEntryForWindowEntry(ENTRY)) && !overviewWindowOccludedByFullscreen(window);
 }
 
 bool CScrollOverview::surfaceTreeHasFrameCallbacks(SP<CWLSurfaceResource> surface) const {
@@ -139,7 +139,7 @@ bool CScrollOverview::hasVisibleRealtimePreviewCallbacks() const {
     };
 
     for (const auto& workspaceEntry : workspaceEntries) {
-        if (!workspaceEntry || workspaceEntry->overviewBox.empty() || !workspaceEntry->overviewBox.overlaps(CBox{{}, MONITOR->m_size}))
+        if (!workspaceIntersectsViewport(workspaceEntry))
             continue;
 
         for (const auto& entry : workspaceEntry->windowEntries) {
@@ -235,7 +235,7 @@ bool CScrollOverview::shouldHandleSurfaceDamage(SP<CWLSurfaceResource> surface) 
             allow ? 1 : 0, reason, ownerName(OWNER.type), reinterpret_cast<uintptr_t>(surface.get()), MONITOR ? MONITOR->m_name : "<none>",
             OWNER.monitor ? OWNER.monitor->m_name : "<none>", WINDOW ? reinterpret_cast<uintptr_t>(WINDOW.get()) : 0,
             WINDOW && WINDOW->m_workspace ? std::to_string(WINDOW->m_workspace->m_id) : "<none>", ENTRY ? 1 : 0, ENTRY ? Hyprview::formatBox(ENTRY->overviewBox) : "<none>",
-            ENTRY ? overviewBoxIntersectsMonitor(ENTRY->overviewBox) : false, WINDOW ? overviewWindowOccludedByFullscreen(WINDOW) : false,
+            ENTRY ? windowEntryIntersectsWorkspaceViewport(ENTRY, workspaceEntryForWindowEntry(ENTRY)) : false, WINDOW ? overviewWindowOccludedByFullscreen(WINDOW) : false,
             OWNER.layer ? reinterpret_cast<uintptr_t>(OWNER.layer.get()) : 0, OWNER.layer ? OWNER.layer->m_namespace : "<none>", OWNER.layer ? sc<int>(OWNER.layer->m_layer) : -1,
             OWNER.layer ? OWNER.layer->m_mapped : false, OWNER.layer ? Desktop::View::validMapped(OWNER.layer) : false));
     };
@@ -276,7 +276,7 @@ bool CScrollOverview::shouldHandleSurfaceDamage(SP<CWLSurfaceResource> surface) 
     }
 
     const auto ENTRY = renderedWindowEntryForWindow(WINDOW);
-    if (!ENTRY || overviewWindowOccludedByFullscreen(WINDOW) || !overviewBoxIntersectsMonitor(ENTRY->overviewBox)) {
+    if (!ENTRY || overviewWindowOccludedByFullscreen(WINDOW) || !windowEntryIntersectsWorkspaceViewport(ENTRY, workspaceEntryForWindowEntry(ENTRY))) {
         logDecision(false, "window-not-visible-in-overview");
         return false;
     }
@@ -320,9 +320,9 @@ bool CScrollOverview::shouldAllowSurfaceFrame(SP<CWLSurfaceResource> surface, co
             allow ? 1 : 0, reason, ownerName(OWNER.type), reinterpret_cast<uintptr_t>(surface.get()), MONITOR ? MONITOR->m_name : "<none>",
             OWNER.monitor ? OWNER.monitor->m_name : "<none>", WINDOW ? reinterpret_cast<uintptr_t>(WINDOW.get()) : 0,
             WINDOW && WINDOW->m_workspace ? std::to_string(WINDOW->m_workspace->m_id) : "<none>", ENTRY ? 1 : 0, ENTRY ? Hyprview::formatBox(ENTRY->overviewBox) : "<none>",
-            ENTRY ? overviewBoxIntersectsMonitor(ENTRY->overviewBox) : false, WINDOW ? overviewWindowVisible(WINDOW) : false, sendingOverviewFrameCallbacks ? 1 : 0,
-            OWNER.layer ? reinterpret_cast<uintptr_t>(OWNER.layer.get()) : 0, OWNER.layer ? OWNER.layer->m_namespace : "<none>", OWNER.layer ? sc<int>(OWNER.layer->m_layer) : -1,
-            OWNER.layer ? OWNER.layer->m_mapped : false, OWNER.layer ? Desktop::View::validMapped(OWNER.layer) : false));
+            ENTRY ? windowEntryIntersectsWorkspaceViewport(ENTRY, workspaceEntryForWindowEntry(ENTRY)) : false, WINDOW ? overviewWindowVisible(WINDOW) : false,
+            sendingOverviewFrameCallbacks ? 1 : 0, OWNER.layer ? reinterpret_cast<uintptr_t>(OWNER.layer.get()) : 0, OWNER.layer ? OWNER.layer->m_namespace : "<none>",
+            OWNER.layer ? sc<int>(OWNER.layer->m_layer) : -1, OWNER.layer ? OWNER.layer->m_mapped : false, OWNER.layer ? Desktop::View::validMapped(OWNER.layer) : false));
     };
 
     if (!surfaceOwnerBelongsToOverviewMonitor(OWNER, MONITOR)) {
@@ -504,7 +504,7 @@ void CScrollOverview::sendOverviewFrameCallbacks(const Time::steady_tp& now) {
     };
 
     for (const auto& workspaceEntry : workspaceEntries) {
-        if (!workspaceEntry || workspaceEntry->overviewBox.empty() || !workspaceEntry->overviewBox.overlaps(CBox{{}, MONITOR->m_size}))
+        if (!workspaceIntersectsViewport(workspaceEntry))
             continue;
 
         for (const auto& entry : workspaceEntry->windowEntries) {

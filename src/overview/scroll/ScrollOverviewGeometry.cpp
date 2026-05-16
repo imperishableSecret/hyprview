@@ -69,9 +69,11 @@ void CScrollOverview::rebuildGeometryCache() {
             entry->overviewBox    = rawOverviewBox;
             entry->overviewBox    = shrinkBox(entry->overviewBox, WINDOW_GAP);
             entry->liveRenderable = windowEntryRenderable(entry);
-            entry->liveVisible    = windowEntryVisible(entry);
+            entry->liveVisible    = windowEntryVisible(entry, workspaceEntry);
 
-            workspaceEntry->hitBox = boxUnion(workspaceEntry->hitBox, entry->overviewBox);
+            CBox clippedHitBox = entry->overviewBox.intersection(workspaceRenderClipBox(workspaceEntry));
+            clippedHitBox.noNegativeSize();
+            workspaceEntry->hitBox = boxUnion(workspaceEntry->hitBox, clippedHitBox);
         }
 
         yoff += WORKSPACE_STEP;
@@ -131,8 +133,12 @@ CBox CScrollOverview::expandedWindowHitBox(const SP<SWindowEntry>& image) const 
     if (!image || !image->liveVisible || image->overviewBox.empty())
         return {};
 
+    CBox box = image->overviewBox.intersection(workspaceRenderClipBox(workspaceEntryForWindowEntry(image)));
+    box.noNegativeSize();
+    if (box.empty())
+        return {};
+
     const double EXPANSION = std::max(0.0, sc<double>(g_hyprviewConfig.mouse.hitboxExpansion));
-    CBox         box       = image->overviewBox;
     box.x -= EXPANSION;
     box.y -= EXPANSION;
     box.w += EXPANSION * 2.0;
