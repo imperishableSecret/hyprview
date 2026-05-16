@@ -707,7 +707,7 @@ void CScrollOverview::renderOverviewLive(const Time::steady_tp& now) {
     if (!MONITOR)
         return;
 
-    rebuildGeometryCache();
+    ensureGeometryCache();
     ++g_currentTelemetryFrame;
 
     Hyprview::telemetryLogLazy([&] {
@@ -763,6 +763,7 @@ void CScrollOverview::renderOverviewLive(const Time::steady_tp& now) {
             if (needsPrune) {
                 std::erase_if(workspaceEntry->windowEntries, [](const auto& entry) { return !entry || !entry->pWindow; });
                 invalidateWindowEntryLookups();
+                markGeometryCacheDirty();
             }
         }
 

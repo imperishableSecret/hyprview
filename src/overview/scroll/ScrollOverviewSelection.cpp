@@ -245,7 +245,7 @@ void CScrollOverview::syncSelectionToViewport(bool damageOnChange) {
 }
 
 bool CScrollOverview::moveHorizontalSelection(bool right) {
-    rebuildGeometryCache();
+    ensureGeometryCache();
     pruneRememberedSelections();
 
     auto CURRENT = entryForKeyboardSelection();
@@ -340,7 +340,7 @@ bool CScrollOverview::activateSelection() {
     if (!g_hyprviewConfig.keyboard.enabled || closing)
         return false;
 
-    rebuildGeometryCache();
+    ensureGeometryCache();
     pruneRememberedSelections();
 
     auto ENTRY = entryForKeyboardSelection();

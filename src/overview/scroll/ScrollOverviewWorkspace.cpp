@@ -166,6 +166,7 @@ bool CScrollOverview::setHorizontalPanForWorkspace(const SP<SWorkspaceEntry>& wo
     else
         ANIM->setValueAndWarp(sc<float>(CLAMPED));
 
+    markGeometryCacheDirty();
     damage();
     if (pMonitor)
         g_pCompositor->scheduleFrameForMonitor(pMonitor.lock());

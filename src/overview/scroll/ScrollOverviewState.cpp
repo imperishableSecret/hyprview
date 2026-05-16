@@ -41,6 +41,7 @@ void CScrollOverview::refreshWorkspaceEntries(PHLWORKSPACE preferredViewport, bo
     });
 
     invalidateWindowEntryLookups();
+    markGeometryCacheDirty();
     workspaceEntries.clear();
 
     for (const auto& w : g_pCompositor->getWorkspaces()) {
@@ -207,7 +208,7 @@ bool CScrollOverview::centerCursorOnWindowEntry(PHLWINDOW window) {
     if (!window || !pMonitor || closing || inputState.mode != ePointerMode::IDLE || !window->m_workspace || window->m_workspace->m_monitor != pMonitor)
         return false;
 
-    rebuildGeometryCache();
+    ensureGeometryCache();
 
     const auto ENTRY = windowEntryForWindow(window);
     if (!ENTRY)

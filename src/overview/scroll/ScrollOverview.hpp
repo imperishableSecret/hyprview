@@ -163,6 +163,9 @@ class CScrollOverview : public IOverview {
     double                   viewOffsetForWorkspaceIndex(size_t index) const;
     Vector2D                 clampedViewOffset(Vector2D offset) const;
     void                     rebuildGeometryCache();
+    void                     ensureGeometryCache();
+    void                     markGeometryCacheDirty();
+    bool                     geometryCacheNeedsRebuild() const;
     bool                     workspaceUsesScrollingLayout(PHLWORKSPACE workspace) const;
     SWorkspacePanRange       horizontalPanRangeForWorkspace(const SP<SWorkspaceEntry>& workspace) const;
     double                   horizontalPanForWorkspace(const SP<SWorkspaceEntry>& workspace) const;
@@ -274,9 +277,12 @@ class CScrollOverview : public IOverview {
     struct SWindowEntry {
         PHLWINDOWREF            pWindow;
         CBox                    overviewBox;
-        bool                    liveRenderable = false;
-        bool                    liveVisible    = false;
-        bool                    highlight      = false;
+        bool                    liveRenderable     = false;
+        bool                    liveVisible        = false;
+        bool                    highlight          = false;
+        const void*             lastRenderedWindow = nullptr;
+        Vector2D                lastGeometryPosition;
+        Vector2D                lastGeometrySize;
         UP<CHyprSignalListener> windowCommit;
     };
 
@@ -285,7 +291,18 @@ class CScrollOverview : public IOverview {
         CBox                          box;
         CBox                          overviewBox;
         CBox                          hitBox;
+        double                        lastContentPan = 0.0;
         std::vector<SP<SWindowEntry>> windowEntries;
+    };
+
+    struct SGeometryCacheSnapshot {
+        const void* monitor = nullptr;
+        Vector2D    monitorPosition;
+        Vector2D    monitorSize;
+        float       scaleValue = 0.F;
+        Vector2D    viewOffsetValue;
+        size_t      activeWorkspaceIndex = 0;
+        size_t      workspaceCount       = 0;
     };
 
     struct SInputState {
@@ -325,6 +342,8 @@ class CScrollOverview : public IOverview {
     bool                                                         realtimePreviewFrameQueued    = false;
     bool                                                         sendingOverviewFrameCallbacks = false;
     mutable bool                                                 windowEntryLookupsDirty       = true;
+    bool                                                         geometryCacheDirty            = true;
+    SGeometryCacheSnapshot                                       geometryCacheSnapshot;
 
     PHLWINDOWREF                                                 closeOnWindow;
     PHLWINDOWREF                                                 closeFrameWindow;

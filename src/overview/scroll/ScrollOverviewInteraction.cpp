@@ -199,7 +199,7 @@ bool CScrollOverview::pointerOverBlockingLayerSurface(const Vector2D& local) con
 }
 
 void CScrollOverview::selectHoveredWorkspace() {
-    rebuildGeometryCache();
+    ensureGeometryCache();
 
     closeOnWindow.reset();
     closeOnWorkspace.reset();
@@ -268,7 +268,7 @@ void CScrollOverview::handlePointerPress(uint32_t button) {
     if (inputState.mode != ePointerMode::IDLE)
         return;
 
-    rebuildGeometryCache();
+    ensureGeometryCache();
 
     inputState               = {};
     inputState.pressPosLocal = lastMousePosLocal;
@@ -360,7 +360,7 @@ void CScrollOverview::beginWindowDrag() {
         return;
     }
 
-    rebuildGeometryCache();
+    ensureGeometryCache();
     if (const auto ENTRY = renderedWindowEntryForWindow(DRAG_WINDOW); ENTRY && !ENTRY->overviewBox.empty()) {
         inputState.windowDrag->sourceBox       = ENTRY->overviewBox;
         inputState.windowDrag->grabOffsetLocal = inputState.lastPosLocal - ENTRY->overviewBox.pos();
@@ -391,7 +391,7 @@ void CScrollOverview::beginWindowDrag() {
 
 void CScrollOverview::updateWindowDrag(const Vector2D& local) {
     inputState.lastPosLocal = local;
-    rebuildGeometryCache();
+    ensureGeometryCache();
 
     if (inputState.windowDrag) {
         if (const auto ENTRY = renderedWindowEntryForWindow(inputState.windowDrag->window.lock()); ENTRY && !ENTRY->overviewBox.empty())
@@ -970,7 +970,7 @@ bool CScrollOverview::hasDropTarget() const {
 }
 
 void CScrollOverview::highlightHoverDebug(bool damageOnChange) {
-    rebuildGeometryCache();
+    ensureGeometryCache();
 
     const auto OLD_HOVERED_WINDOW    = hoveredWindow;
     const auto OLD_HOVERED_WORKSPACE = hoveredWorkspace;

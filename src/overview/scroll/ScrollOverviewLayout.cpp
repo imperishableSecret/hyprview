@@ -112,6 +112,7 @@ bool CScrollOverview::setViewportOffset(Vector2D offset, bool warp, bool activat
     else
         *viewOffset = CLAMPED;
 
+    markGeometryCacheDirty();
     syncViewportWorkspaceFromOffset(CLAMPED);
     if (OLD_WORKSPACE_INDEX != viewportCurrentWorkspace)
         syncSelectionToViewport(false);

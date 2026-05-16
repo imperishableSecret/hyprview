@@ -29,13 +29,33 @@
 #undef private
 #include <hyprland/src/config/shared/complex/ComplexDataTypes.hpp>
 
+namespace {
+    constexpr double GEOMETRY_CACHE_EPSILON = 0.01;
+
+    bool             geometryValueChanged(double a, double b) {
+        return std::abs(a - b) > GEOMETRY_CACHE_EPSILON;
+    }
+
+    bool geometryValueChanged(const Vector2D& a, const Vector2D& b) {
+        return geometryValueChanged(a.x, b.x) || geometryValueChanged(a.y, b.y);
+    }
+}
+
 void CScrollOverview::rebuildGeometryCache() {
-    if (!pMonitor)
+    if (!pMonitor) {
+        markGeometryCacheDirty();
         return;
+    }
+
+    const auto MONITOR = pMonitor.lock();
+    if (!MONITOR) {
+        markGeometryCacheDirty();
+        return;
+    }
 
     invalidateWindowEntryLookups();
 
-    const auto VIEWPORT_CENTER = CBox{{}, pMonitor->m_size}.middle();
+    const auto VIEWPORT_CENTER = CBox{{}, MONITOR->m_size}.middle();
     const auto WINDOW_GAP      = (std::max(0.0, static_cast<double>(g_hyprviewConfig.scrolling.windowGap)) / 2.0) * overviewStyleProgress();
     const auto WORKSPACE_STEP  = workspaceOverviewStep() * scale->value();
     float      yoff            = -sc<float>(activeWorkspaceEntryIndex()) * WORKSPACE_STEP;
@@ -46,7 +66,7 @@ void CScrollOverview::rebuildGeometryCache() {
 
         const auto CONTENT_PAN_X = horizontalPanForWorkspace(workspaceEntry);
 
-        workspaceEntry->overviewBox = CBox{{}, pMonitor->m_size};
+        workspaceEntry->overviewBox = CBox{{}, MONITOR->m_size};
         workspaceEntry->overviewBox.translate(-VIEWPORT_CENTER).scale(scale->value()).translate(VIEWPORT_CENTER).translate(-viewOffset->value() * scale->value());
         workspaceEntry->overviewBox.translate({0.F, yoff});
         workspaceEntry->hitBox = workspaceEntry->overviewBox;
@@ -60,26 +80,109 @@ void CScrollOverview::rebuildGeometryCache() {
                 continue;
 
             const auto WINDOW_PAN = WINDOW->m_isFloating ? 0.0 : CONTENT_PAN_X;
-            const CBox BASE_BOX   = {WINDOW->m_realPosition->value() - pMonitor->m_position, WINDOW->m_realSize->value()};
+            const CBox BASE_BOX   = {WINDOW->m_realPosition->value() - MONITOR->m_position, WINDOW->m_realSize->value()};
 
             CBox       rawOverviewBox = CBox{BASE_BOX.pos() - Vector2D{WINDOW_PAN, 0.0}, BASE_BOX.size()};
             rawOverviewBox.translate(-VIEWPORT_CENTER).scale(scale->value()).translate(VIEWPORT_CENTER).translate(-viewOffset->value() * scale->value());
             rawOverviewBox.translate({0.F, yoff});
 
-            entry->overviewBox    = rawOverviewBox;
-            entry->overviewBox    = shrinkBox(entry->overviewBox, WINDOW_GAP);
-            entry->liveRenderable = windowEntryRenderable(entry);
-            entry->liveVisible    = windowEntryVisible(entry, workspaceEntry);
+            entry->overviewBox          = rawOverviewBox;
+            entry->overviewBox          = shrinkBox(entry->overviewBox, WINDOW_GAP);
+            entry->liveRenderable       = windowEntryRenderable(entry);
+            entry->liveVisible          = windowEntryVisible(entry, workspaceEntry);
+            entry->lastRenderedWindow   = WINDOW.get();
+            entry->lastGeometryPosition = WINDOW->m_realPosition->value();
+            entry->lastGeometrySize     = WINDOW->m_realSize->value();
 
             CBox clippedHitBox = entry->overviewBox.intersection(workspaceRenderClipBox(workspaceEntry));
             clippedHitBox.noNegativeSize();
             workspaceEntry->hitBox = boxUnion(workspaceEntry->hitBox, clippedHitBox);
         }
 
+        workspaceEntry->lastContentPan = CONTENT_PAN_X;
         yoff += WORKSPACE_STEP;
     }
 
     buildInsertionMarkers();
+
+    geometryCacheSnapshot = {
+        .monitor              = MONITOR.get(),
+        .monitorPosition      = MONITOR->m_position,
+        .monitorSize          = MONITOR->m_size,
+        .scaleValue           = scale->value(),
+        .viewOffsetValue      = viewOffset->value(),
+        .activeWorkspaceIndex = activeWorkspaceEntryIndex(),
+        .workspaceCount       = workspaceEntries.size(),
+    };
+    geometryCacheDirty = false;
+}
+
+void CScrollOverview::ensureGeometryCache() {
+    if (geometryCacheNeedsRebuild())
+        rebuildGeometryCache();
+}
+
+void CScrollOverview::markGeometryCacheDirty() {
+    geometryCacheDirty = true;
+}
+
+bool CScrollOverview::geometryCacheNeedsRebuild() const {
+    if (geometryCacheDirty)
+        return true;
+
+    const auto MONITOR = pMonitor.lock();
+    if (!MONITOR || !scale || !viewOffset)
+        return true;
+
+    if (geometryCacheSnapshot.monitor != MONITOR.get() || geometryValueChanged(geometryCacheSnapshot.monitorPosition, MONITOR->m_position) ||
+        geometryValueChanged(geometryCacheSnapshot.monitorSize, MONITOR->m_size))
+        return true;
+
+    if (scale->isBeingAnimated() || viewOffset->isBeingAnimated())
+        return true;
+
+    if (geometryValueChanged(geometryCacheSnapshot.scaleValue, scale->value()) || geometryValueChanged(geometryCacheSnapshot.viewOffsetValue, viewOffset->value()))
+        return true;
+
+    if (geometryCacheSnapshot.workspaceCount != workspaceEntries.size() || geometryCacheSnapshot.activeWorkspaceIndex != activeWorkspaceEntryIndex())
+        return true;
+
+    for (const auto& workspaceEntry : workspaceEntries) {
+        if (!workspaceEntry || !workspaceEntry->pWorkspace)
+            return true;
+
+        const auto PAN      = horizontalPanForWorkspace(workspaceEntry);
+        const auto PAN_ANIM = workspaceContentPan.find(workspaceEntry->pWorkspace->m_id);
+        if ((PAN_ANIM != workspaceContentPan.end() && PAN_ANIM->second && PAN_ANIM->second->isBeingAnimated()) || geometryValueChanged(workspaceEntry->lastContentPan, PAN))
+            return true;
+
+        for (const auto& entry : workspaceEntry->windowEntries) {
+            if (!entry || !entry->pWindow)
+                return true;
+
+            const auto WINDOW = windowForEntry(entry);
+            if (!WINDOW || !WINDOW->m_realPosition || !WINDOW->m_realSize)
+                return true;
+
+            if (entry->lastRenderedWindow != WINDOW.get())
+                return true;
+
+            if (WINDOW->m_realPosition->isBeingAnimated() || WINDOW->m_realSize->isBeingAnimated())
+                return true;
+
+            if (geometryValueChanged(entry->lastGeometryPosition, WINDOW->m_realPosition->value()) || geometryValueChanged(entry->lastGeometrySize, WINDOW->m_realSize->value()))
+                return true;
+
+            const bool RENDERABLE = windowEntryRenderable(entry);
+            if (entry->liveRenderable != RENDERABLE)
+                return true;
+
+            if (entry->liveVisible != windowEntryVisible(entry, workspaceEntry))
+                return true;
+        }
+    }
+
+    return false;
 }
 
 double CScrollOverview::overviewStyleProgress() const {
