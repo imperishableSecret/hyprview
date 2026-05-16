@@ -22,7 +22,7 @@ The live rendering path is active.
 | Hit testing | Pointer hit testing uses live visibility state. |
 | Keyboard selection | Selection skips entries that are not live-renderable. |
 | Drag and drop | Drag state stores the dragged Hyprland window plus live source geometry, and drag previews render live window content. |
-| Documentation | README describes the live path, but old internal names still leak into code and plans. |
+| Documentation | README and this plan describe the live path. Snapshot-era implementation names have been cleaned up, except references to Hyprland's own close-animation snapshot. |
 
 ## Architecture model
 
@@ -43,6 +43,7 @@ Hyprview's live architecture has one source of visual truth: Hyprland surfaces.
 ## Design principles
 
 - No cached window image is a source of truth.
+- Hyprland's close-animation snapshot is allowed only for fading closed windows whose live surfaces are gone.
 - No fallback render mode should be added for retired snapshot behavior.
 - Live geometry records should drive rendering, hit testing, selection, drag/drop, and workspace motion.
 - Hyprland's renderer should draw Hyprland surfaces; Hyprview should not invent a compositor pipeline.
@@ -177,19 +178,20 @@ Exit criteria:
 
 ## Phase F: Remove obsolete snapshot-era code and docs
 
-Goal: Finish the architectural cleanup once the live path is stable.
+Goal: Keep the live path free of retired cached-thumbnail concepts while preserving Hyprland's close-animation fade behavior.
 
 Work:
 
-- Remove unused includes, comments, telemetry, and helper names that only existed for cached workspaceEntries.
+- Remove unused includes, comments, telemetry, and helper names that only existed for cached window/workspace image entries.
+- Keep close-fade helper names explicit so `m_snapshotFB` reads as Hyprland closed-window fade state, not Hyprview overview caching.
 - Remove old plan entries that describe temporary fallback behavior.
-- Update README to describe only live rendering behavior and current quirks.
+- Update README to describe live rendering behavior, the close-fade exception, and current quirks.
 - Update examples if config names or defaults changed.
 - Refresh graphify for the Hyprview code scope after code changes.
 
 Exit criteria:
 
-- `rg` finds no active snapshot-era implementation names in `src/overview/scroll/` except historical docs or explicitly retired notes.
+- `rg` finds no active snapshot-era implementation names in `src/overview/scroll/` except `m_snapshotFB` close-fade references and their comments.
 - README, example config, and this plan describe the same behavior.
 - The graph no longer reports removed redraw/cache functions as central live architecture nodes after a scoped refresh.
 
@@ -232,7 +234,7 @@ Use this matrix after each phase that touches code.
 | `live-drag-geometry` | Drag/drop state and preview based on live geometry records. |
 | `live-render-culling` | Visible workspace/window/layer culling and frame policy cleanup. |
 | `live-lifecycle-polish` | Focus, close animation, fullscreen, and workspace-switch lifecycle fixes. |
-| `live-docs-cleanup` | README, example config, and plan cleanup after code names settle. |
+| `live-docs-cleanup` | README, example config, plan cleanup, and graph refresh after code names settle. |
 
 ## Anti-goals
 
